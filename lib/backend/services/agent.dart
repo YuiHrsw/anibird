@@ -12,33 +12,15 @@ class ChatContext {
   final List<ChatMessage> history;
 }
 
-class AgentReply {
-  const AgentReply({
-    required this.text,
-    required this.recommendations,
-    required this.toolTraces,
-  });
-
-  final String text;
-  final List<Subject> recommendations;
-  final List<ToolTrace> toolTraces;
-}
-
 class AgentReplyUpdate {
   const AgentReplyUpdate({
-    required this.text,
+    required this.timeline,
     required this.recommendations,
-    required this.toolTraces,
-    required this.steps,
-    this.statusText,
     required this.isFinal,
   });
 
-  final String text;
+  final List<ChatTimelineItem> timeline;
   final List<Subject> recommendations;
-  final List<ToolTrace> toolTraces;
-  final List<AgentStep> steps;
-  final String? statusText;
   final bool isFinal;
 }
 
@@ -57,301 +39,136 @@ class Agent {
     ChatContext context, {
     bool Function()? shouldStop,
   }) async* {
-    final reactMessages = <LlmMessage>[
-      LlmMessage(role: 'system', content: _buildSystemPrompt(_tools.values)),
+    final messages = <LlmMessage>[
+      LlmMessage(role: 'system', content: _buildSystemPrompt()),
       ...context.history.map(_historyToLlm),
       LlmMessage(role: 'user', content: text),
     ];
-    final traces = <ToolTrace>[];
-    final steps = <AgentStep>[];
-    var finalRecommendations = <Subject>[];
-    var stepIndex = 0;
+    final timeline = <ChatTimelineItem>[];
+    var recommendations = <Subject>[];
 
-    while (!(shouldStop?.call() ?? false)) {
-      yield AgentReplyUpdate(
-        text: '',
-        recommendations: finalRecommendations,
-        toolTraces: traces,
-        steps: steps,
-        statusText: '正在进行第 ${stepIndex + 1} 步推理...',
-        isFinal: false,
-      );
-
-      final modelText = await _completeReactStep(reactMessages);
+    var turn = 0;
+    while (true) {
       if (shouldStop?.call() ?? false) {
         yield AgentReplyUpdate(
-          text: '',
-          recommendations: finalRecommendations,
-          toolTraces: traces,
-          steps: steps,
-          statusText: null,
+          timeline: timeline,
+          recommendations: recommendations,
           isFinal: true,
         );
         return;
       }
 
-      final decision = _parseDecision(modelText);
-      reactMessages.add(LlmMessage(role: 'assistant', content: modelText));
+      final request = ChatRequest(
+        messages: messages,
+        tools: _tools.values.map((tool) => tool.definition).toList(),
+      );
+      ChatResponse? response;
+      var assistantText = '';
+      final assistantTimelineId = 'assistant-turn-$turn';
+      var hasAssistantTimeline = false;
+      await for (final event in _llmProvider.streamChat(request)) {
+        if (event.contentDelta.isNotEmpty) {
+          assistantText = event.response.content.trim();
+          if (assistantText.isNotEmpty) {
+            if (!hasAssistantTimeline) {
+              timeline.add(
+                ChatTimelineItem.assistant(
+                  id: assistantTimelineId,
+                  content: assistantText,
+                ),
+              );
+              hasAssistantTimeline = true;
+            } else {
+              final timelineIndex = timeline.lastIndexWhere(
+                (item) => item.id == assistantTimelineId,
+              );
+              if (timelineIndex != -1) {
+                timeline[timelineIndex] = timeline[timelineIndex].copyWith(
+                  content: assistantText,
+                );
+              }
+            }
+          }
+          yield AgentReplyUpdate(
+            timeline: timeline,
+            recommendations: recommendations,
+            isFinal: false,
+          );
+        }
+        if (event.isDone) {
+          response = event.response;
+          assistantText = response.content.trim();
+        }
+      }
+      if (response == null) {
+        throw StateError('LLM 没有返回可用响应。');
+      }
 
-      if (decision.type == _DecisionType.finalAnswer) {
-        steps.add(
-          AgentStep(
-            thought: decision.thought ?? '',
-            action: 'final_answer',
-            status: 'completed',
-          ),
-        );
-        final finalText = decision.finalAnswer?.trim();
+      if (response.toolCalls.isEmpty) {
+        if (assistantText.isEmpty) {
+          throw StateError(
+            '模型返回了空响应，且没有 tool_calls。当前模型或网关可能不支持 function calling，或响应格式不符合预期。',
+          );
+        }
+        messages.add(LlmMessage(role: 'assistant', content: assistantText));
+        if (!hasAssistantTimeline && assistantText.isNotEmpty) {
+          timeline.add(
+            ChatTimelineItem.assistant(
+              id: assistantTimelineId,
+              content: assistantText,
+            ),
+          );
+        }
         yield AgentReplyUpdate(
-          text: (finalText == null || finalText.isEmpty)
-              ? '基于 Bangumi 数据检索结果整理，我已经拿到足够观察结果，但模型没有给出可用的最终回答。请手动停止后查看下方 ReAct 过程和工具记录。'
-              : finalText,
-          recommendations: finalRecommendations,
-          toolTraces: traces,
-          steps: steps,
-          statusText: null,
+          timeline: timeline,
+          recommendations: recommendations,
           isFinal: true,
         );
         return;
       }
 
-      if (decision.type == _DecisionType.invalid) {
-        reactMessages.add(
-          const LlmMessage(
-            role: 'user',
-            content:
-                'Observation: 你刚才的输出无法解析。请严格只返回 JSON，并包含 thought、action、action_input 或 final_answer。',
-          ),
-        );
-        yield AgentReplyUpdate(
-          text: '',
-          recommendations: finalRecommendations,
-          toolTraces: traces,
-          steps: steps,
-          statusText: '模型输出格式不正确，正在要求其重新按 ReAct 格式响应...',
-          isFinal: false,
-        );
-        stepIndex += 1;
-        continue;
-      }
-
-      final actionName = decision.actionName;
-      if (actionName == null || actionName.isEmpty) {
-        reactMessages.add(
-          const LlmMessage(
-            role: 'user',
-            content: 'Observation: action 不能为空。请选择一个可用工具，或者直接给出 final_answer。',
-          ),
-        );
-        stepIndex += 1;
-        continue;
-      }
-
-      steps.add(
-        AgentStep(
-          thought: decision.thought ?? '',
-          action: actionName,
-          actionInputJson: _prettyJson(decision.actionInput),
-          status: 'started',
+      messages.add(
+        LlmMessage(
+          role: 'assistant',
+          content: response.content,
+          toolCalls: response.toolCalls,
         ),
       );
 
-      final tool = _tools[actionName];
-      if (tool == null) {
-        final errorPayload = <String, dynamic>{
-          'ok': false,
-          'error': 'tool_not_found',
-          'message': 'Tool $actionName is not available.',
-        };
-        traces.add(
-          ToolTrace(
-            toolName: actionName,
-            summary: '未找到对应工具，已将错误返回给模型。',
-            inputJson: _prettyJson(decision.actionInput),
-            outputJson: formatStructuredData(
-              errorPayload,
-              label: 'Tool error',
-            ),
-          ),
-        );
-        reactMessages.add(
-          LlmMessage(
-            role: 'user',
-            content: 'Observation from $actionName:\n${_errorObservationText(errorPayload)}',
-          ),
-        );
-        steps[steps.length - 1] = AgentStep(
-          thought: steps.last.thought,
-          action: steps.last.action,
-          actionInputJson: steps.last.actionInputJson,
-          observationJson: formatStructuredData(
-            errorPayload,
-            label: 'Observation',
-          ),
-          status: 'failed',
-        );
-        stepIndex += 1;
-        continue;
-      }
-
-      yield AgentReplyUpdate(
-        text: '',
-        recommendations: finalRecommendations,
-        toolTraces: traces,
-        steps: steps,
-        statusText: '正在执行 ${tool.definition.name}...',
-        isFinal: false,
-      );
-
-      try {
-        final result = await tool.execute(decision.actionInput);
+      for (final toolCall in response.toolCalls) {
         if (shouldStop?.call() ?? false) {
           yield AgentReplyUpdate(
-            text: '',
-            recommendations: finalRecommendations,
-            toolTraces: traces,
-            steps: steps,
-            statusText: null,
+            timeline: timeline,
+            recommendations: recommendations,
             isFinal: true,
           );
           return;
         }
-        traces.add(
-          ToolTrace(
-            toolName: result.toolName,
-            summary: result.summary,
-            inputJson: _prettyJson(decision.actionInput),
-            outputJson: formatStructuredData(
-              result.payload,
-              label: 'Tool output',
-            ),
+
+        final actionName = toolCall.name;
+        final execution = await _executeToolCall(toolCall);
+        messages.add(execution.toolMessage);
+        timeline.add(
+          ChatTimelineItem.toolCall(
+            id: toolCall.id,
+            action: actionName,
+            actionInputJson: execution.actionInputJson,
+            observationJson: execution.observationJson,
           ),
         );
-        if (result.toolName == 'present_recommendations') {
-          finalRecommendations = result.subjects;
-        }
-        reactMessages.add(
-          LlmMessage(
-            role: 'user',
-            content:
-                'Observation from ${result.toolName}:\n${result.observationText}',
-          ),
-        );
-        steps[steps.length - 1] = AgentStep(
-          thought: steps.last.thought,
-          action: steps.last.action,
-          actionInputJson: steps.last.actionInputJson,
-          observationJson: formatStructuredData(
-            result.payload,
-            label: 'Observation',
-          ),
-          status: 'completed',
+        recommendations = _mergeRecommendations(
+          current: recommendations,
+          incoming: execution.subjects,
         );
         yield AgentReplyUpdate(
-          text: '',
-          recommendations: finalRecommendations,
-          toolTraces: traces,
-          steps: steps,
-          statusText: result.toolName == 'present_recommendations'
-              ? '已更新最终推荐列表，正在生成最终回答...'
-              : '已获取 ${result.toolName} 的观察结果，正在继续推理...',
-          isFinal: false,
-        );
-      } catch (error) {
-        final errorPayload = <String, dynamic>{
-          'ok': false,
-          'error': 'tool_execution_failed',
-          'message': error.toString(),
-          'tool_name': tool.definition.name,
-          'input': decision.actionInput,
-        };
-        traces.add(
-          ToolTrace(
-            toolName: tool.definition.name,
-            summary: '调用失败，错误已返回给模型重试。',
-            inputJson: _prettyJson(decision.actionInput),
-            outputJson: formatStructuredData(
-              errorPayload,
-              label: 'Tool error',
-            ),
-          ),
-        );
-        reactMessages.add(
-          LlmMessage(
-            role: 'user',
-            content:
-                'Observation from ${tool.definition.name}:\n${_errorObservationText(errorPayload)}\n请根据错误修正参数后继续。',
-          ),
-        );
-        steps[steps.length - 1] = AgentStep(
-          thought: steps.last.thought,
-          action: steps.last.action,
-          actionInputJson: steps.last.actionInputJson,
-          observationJson: formatStructuredData(
-            errorPayload,
-            label: 'Observation',
-          ),
-          status: 'failed',
-        );
-        yield AgentReplyUpdate(
-          text: '',
-          recommendations: finalRecommendations,
-          toolTraces: traces,
-          steps: steps,
-          statusText: '工具 ${tool.definition.name} 调用失败，正在让模型修正参数重试...',
+          timeline: timeline,
+          recommendations: recommendations,
           isFinal: false,
         );
       }
 
-      stepIndex += 1;
+      turn += 1;
     }
-
-    yield AgentReplyUpdate(
-      text: '',
-      recommendations: finalRecommendations,
-      toolTraces: traces,
-      steps: steps,
-      statusText: null,
-      isFinal: true,
-    );
-  }
-
-  Future<AgentReply> sendUserMessage(String text, ChatContext context) async {
-    AgentReplyUpdate? lastUpdate;
-    await for (final update in streamUserMessage(text, context)) {
-      lastUpdate = update;
-    }
-    final fallback =
-        lastUpdate ??
-        const AgentReplyUpdate(
-          text: '基于 Bangumi 数据检索结果整理，我暂时没有拿到足够信息。',
-          recommendations: <Subject>[],
-          toolTraces: <ToolTrace>[],
-          steps: <AgentStep>[],
-          statusText: null,
-          isFinal: true,
-        );
-    return AgentReply(
-      text: fallback.text,
-      recommendations: fallback.recommendations,
-      toolTraces: fallback.toolTraces,
-    );
-  }
-
-  Future<String> _completeReactStep(List<LlmMessage> messages) async {
-    final buffer = StringBuffer();
-    await for (final event in _llmProvider.streamChat(
-      ChatRequest(messages: messages),
-    )) {
-      if (event.contentDelta.isNotEmpty) {
-        buffer.write(event.contentDelta);
-      } else if (event.isDone) {
-        buffer
-          ..clear()
-          ..write(event.response.content);
-      }
-    }
-    return buffer.toString().trim();
   }
 
   LlmMessage _historyToLlm(ChatMessage message) {
@@ -364,115 +181,62 @@ class Agent {
       content: message.content,
     );
   }
-}
 
-enum _DecisionType { action, finalAnswer, invalid }
-
-class _ReActDecision {
-  const _ReActDecision({
-    required this.type,
-    this.thought,
-    this.actionName,
-    this.actionInput = const <String, dynamic>{},
-    this.finalAnswer,
-  });
-
-  final _DecisionType type;
-  final String? thought;
-  final String? actionName;
-  final Map<String, dynamic> actionInput;
-  final String? finalAnswer;
-}
-
-_ReActDecision _parseDecision(String rawText) {
-  try {
-    final decoded = jsonDecode(_extractJsonObject(rawText));
-    if (decoded is! Map) {
-      return const _ReActDecision(type: _DecisionType.invalid);
-    }
-    final map = decoded.cast<String, dynamic>();
-    final action = map['action']?.toString().trim();
-    if (action == 'final_answer') {
-      return _ReActDecision(
-        type: _DecisionType.finalAnswer,
-        thought: map['thought']?.toString(),
-        finalAnswer: map['final_answer']?.toString(),
+  Future<_ToolExecutionResult> _executeToolCall(ToolCall toolCall) async {
+    final actionName = toolCall.name;
+    final tool = _tools[actionName];
+    if (tool == null) {
+      final errorPayload = <String, dynamic>{
+        'ok': false,
+        'error': 'tool_not_found',
+        'message': 'Tool $actionName is not available.',
+      };
+      return _ToolExecutionResult.failure(
+        toolName: actionName,
+        toolCallId: toolCall.id,
+        input: toolCall.arguments,
+        payload: errorPayload,
+        summary: '未找到对应工具。',
       );
     }
-    if (action == null || action.isEmpty) {
-      return const _ReActDecision(type: _DecisionType.invalid);
+
+    try {
+      final result = await tool.execute(toolCall.arguments);
+      return _ToolExecutionResult.success(
+        toolCallId: toolCall.id,
+        input: toolCall.arguments,
+        result: result,
+      );
+    } catch (error) {
+      final errorPayload = <String, dynamic>{
+        'ok': false,
+        'error': 'tool_execution_failed',
+        'message': error.toString(),
+        'tool_name': actionName,
+        'input': toolCall.arguments,
+      };
+      return _ToolExecutionResult.failure(
+        toolName: actionName,
+        toolCallId: toolCall.id,
+        input: toolCall.arguments,
+        payload: errorPayload,
+        summary: '工具调用失败。',
+      );
     }
-    return _ReActDecision(
-      type: _DecisionType.action,
-      thought: map['thought']?.toString(),
-      actionName: action,
-      actionInput:
-          (map['action_input'] as Map?)?.cast<String, dynamic>() ??
-          const <String, dynamic>{},
-    );
-  } catch (_) {
-    return const _ReActDecision(type: _DecisionType.invalid);
   }
 }
 
-String _extractJsonObject(String rawText) {
-  final trimmed = rawText.trim();
-  if (trimmed.startsWith('```')) {
-    final firstBrace = trimmed.indexOf('{');
-    final lastBrace = trimmed.lastIndexOf('}');
-    if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
-      return trimmed.substring(firstBrace, lastBrace + 1);
-    }
-  }
-  return trimmed;
-}
-
-String _buildSystemPrompt(Iterable<AgentTool> tools) {
-  final toolList = tools
-      .map(
-        (tool) =>
-            '- ${tool.definition.name}: ${tool.definition.description}\n'
-            '  schema: ${jsonEncode(tool.definition.inputSchema)}',
-      )
-      .join('\n');
-
+String _buildSystemPrompt() {
   return '''
-你是 Anibird 内置的 Bangumi 动画助手，现在必须严格按照 ReAct 模式工作。
+你是 Anibird 内置的 Bangumi 动画助手。
 
-你每一步都只能返回一个 JSON 对象，不要输出任何 JSON 之外的文字。
-
-可用动作:
-$toolList
-
-输出格式只有两种:
-
-1. 继续行动
-{
-  "thought": "你对当前信息的简短判断",
-  "action": "工具名",
-  "action_input": {
-    "参数": "值"
-  }
-}
-
-2. 给出最终答案
-{
-  "thought": "为什么现在可以回答",
-  "action": "final_answer",
-  "final_answer": "基于 Bangumi 数据检索结果整理，... 最终给用户展示的 Markdown 回答"
-}
-
-规则:
-1. 严格只输出 JSON。
-2. 一次只做一个 action。
-3. 当用户按题材、风格、圈层、标签找番时，优先使用 search_subjects_by_tags，再考虑 search_anime。
-4. 对所有会返回列表的工具，主动设置合适的数量参数；一般先召回 5 到 8 条，不要一次取太多。
-5. 如果你希望在回答下方展示推荐卡片，可以在 final_answer 之前调用 present_recommendations，并传入最终推荐的 subject_id 列表，顺序最好和正文推荐顺序一致。
-6. 除了 present_recommendations，其它工具都只是过程，不代表最终推荐结果。
-7. 搜索工具的 sort 只能使用 match、heat、rank、score；不确定时用 match。
-8. 如果 Observation 显示 ok=false 或错误信息，必须根据错误修正参数后再继续。
-9. 最终回答必须明确说明“基于 Bangumi 数据检索结果整理”。
-10. 不要因为步数或谨慎而停止推理，除非你已经调用了必要工具并能给出 final_answer。
+请优先通过 Bangumi 工具获取事实，再回答用户问题。
+如果你希望在回答下方展示推荐卡片，可以调用 present_recommendations，并按展示顺序传入 subject_id。
+如果要调用 present_recommendations，请在给出最终回答之前提前调用，这样用户才能正常看到你输出的结果。
+搜索工具的 sort 只能使用 match、heat、rank、score；不确定时优先用 match。
+如果工具结果显示 ok=false 或错误信息，请根据已有信息自行判断是否继续调用工具、调整参数，或直接回答。
+最终回答使用中文 Markdown，并明确说明“基于 Bangumi 数据检索结果整理”。
+除非用户明确要求极短回答，否则尽量给出详细清晰的回答。
 ''';
 }
 
@@ -492,4 +256,66 @@ String _errorObservationText(Map<String, dynamic> value) {
 String _prettyJson(Map<String, dynamic> value) {
   const encoder = JsonEncoder.withIndent('  ');
   return encoder.convert(value);
+}
+
+List<Subject> _mergeRecommendations({
+  required List<Subject> current,
+  required List<Subject> incoming,
+}) {
+  if (incoming.isEmpty) {
+    return current;
+  }
+  return incoming;
+}
+
+class _ToolExecutionResult {
+  const _ToolExecutionResult({
+    required this.toolMessage,
+    required this.actionInputJson,
+    required this.subjects,
+    required this.observationJson,
+  });
+
+  final LlmMessage toolMessage;
+  final String actionInputJson;
+  final List<Subject> subjects;
+  final String observationJson;
+
+  factory _ToolExecutionResult.success({
+    required String toolCallId,
+    required Map<String, dynamic> input,
+    required ToolResult result,
+  }) {
+    return _ToolExecutionResult(
+      toolMessage: LlmMessage(
+        role: 'tool',
+        name: result.toolName,
+        toolCallId: toolCallId,
+        content: result.observationText,
+      ),
+      actionInputJson: _prettyJson(input),
+      subjects: result.subjects,
+      observationJson: formatStructuredData(result.payload, label: 'Observation'),
+    );
+  }
+
+  factory _ToolExecutionResult.failure({
+    required String toolName,
+    required String toolCallId,
+    required Map<String, dynamic> input,
+    required Map<String, dynamic> payload,
+    required String summary,
+  }) {
+    return _ToolExecutionResult(
+      toolMessage: LlmMessage(
+        role: 'tool',
+        name: toolName,
+        toolCallId: toolCallId,
+        content: _errorObservationText(payload),
+      ),
+      actionInputJson: _prettyJson(input),
+      subjects: const <Subject>[],
+      observationJson: formatStructuredData(payload, label: 'Observation'),
+    );
+  }
 }

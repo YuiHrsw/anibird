@@ -1,35 +1,52 @@
 import 'subject.dart';
 
 enum ChatRole { system, user, assistant }
+enum ChatTimelineItemType { assistant, toolCall }
 
-class ToolTrace {
-  const ToolTrace({
-    required this.toolName,
-    required this.summary,
-    required this.inputJson,
-    required this.outputJson,
-  });
+class ChatTimelineItem {
+  const ChatTimelineItem.assistant({
+    required this.id,
+    required this.content,
+  }) : type = ChatTimelineItemType.assistant,
+       action = null,
+       actionInputJson = null,
+       observationJson = null;
 
-  final String toolName;
-  final String summary;
-  final String inputJson;
-  final String outputJson;
-}
-
-class AgentStep {
-  const AgentStep({
-    required this.thought,
+  const ChatTimelineItem.toolCall({
+    required this.id,
     required this.action,
-    this.actionInputJson,
-    this.observationJson,
-    required this.status,
-  });
+    required this.actionInputJson,
+    required this.observationJson,
+  }) : type = ChatTimelineItemType.toolCall,
+       content = null;
 
-  final String thought;
-  final String action;
+  final String id;
+  final ChatTimelineItemType type;
+  final String? content;
+  final String? action;
   final String? actionInputJson;
   final String? observationJson;
-  final String status;
+
+  ChatTimelineItem copyWith({
+    String? id,
+    String? content,
+    String? action,
+    String? actionInputJson,
+    String? observationJson,
+  }) {
+    if (type == ChatTimelineItemType.assistant) {
+      return ChatTimelineItem.assistant(
+        id: id ?? this.id,
+        content: content ?? this.content ?? '',
+      );
+    }
+    return ChatTimelineItem.toolCall(
+      id: id ?? this.id,
+      action: action ?? this.action ?? '',
+      actionInputJson: actionInputJson ?? this.actionInputJson,
+      observationJson: observationJson ?? this.observationJson,
+    );
+  }
 }
 
 class ChatMessage {
@@ -37,10 +54,8 @@ class ChatMessage {
     required this.id,
     required this.role,
     required this.content,
+    this.timeline = const <ChatTimelineItem>[],
     this.recommendations = const <Subject>[],
-    this.toolTraces = const <ToolTrace>[],
-    this.steps = const <AgentStep>[],
-    this.statusText,
     this.isLoading = false,
     this.isError = false,
   });
@@ -48,10 +63,8 @@ class ChatMessage {
   final String id;
   final ChatRole role;
   final String content;
+  final List<ChatTimelineItem> timeline;
   final List<Subject> recommendations;
-  final List<ToolTrace> toolTraces;
-  final List<AgentStep> steps;
-  final String? statusText;
   final bool isLoading;
   final bool isError;
 
@@ -59,10 +72,8 @@ class ChatMessage {
     String? id,
     ChatRole? role,
     String? content,
+    List<ChatTimelineItem>? timeline,
     List<Subject>? recommendations,
-    List<ToolTrace>? toolTraces,
-    List<AgentStep>? steps,
-    String? statusText,
     bool? isLoading,
     bool? isError,
   }) {
@@ -70,10 +81,8 @@ class ChatMessage {
       id: id ?? this.id,
       role: role ?? this.role,
       content: content ?? this.content,
+      timeline: timeline ?? this.timeline,
       recommendations: recommendations ?? this.recommendations,
-      toolTraces: toolTraces ?? this.toolTraces,
-      steps: steps ?? this.steps,
-      statusText: statusText ?? this.statusText,
       isLoading: isLoading ?? this.isLoading,
       isError: isError ?? this.isError,
     );

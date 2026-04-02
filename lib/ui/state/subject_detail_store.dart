@@ -64,16 +64,17 @@ class SubjectDetailStore extends ValueNotifier<SubjectDetailState> {
   SubjectDetailStore(this._repository) : super(const SubjectDetailState());
 
   final BangumiRepository _repository;
+  bool _isDisposed = false;
 
   Future<void> load(int subjectId) async {
-    value = value.copyWith(isLoading: true, clearError: true);
+    _setValue(value.copyWith(isLoading: true, clearError: true));
     try {
       final subject = await _repository.getSubjectDetail(subjectId);
       final relatedSubjects = await _repository.getRelatedSubjects(subjectId);
       final episodes = await _repository.getEpisodes(subjectId);
       final characters = await _repository.getRelatedCharacters(subjectId);
       final persons = await _repository.getRelatedPersons(subjectId);
-      value = value.copyWith(
+      _setValue(value.copyWith(
         isLoading: false,
         hasLoaded: true,
         subject: subject,
@@ -81,13 +82,13 @@ class SubjectDetailStore extends ValueNotifier<SubjectDetailState> {
         episodes: episodes.data,
         characters: characters,
         persons: persons,
-      );
+      ));
     } catch (error) {
-      value = value.copyWith(
+      _setValue(value.copyWith(
         isLoading: false,
         hasLoaded: true,
         error: error.toString(),
-      );
+      ));
     }
   }
 
@@ -99,29 +100,42 @@ class SubjectDetailStore extends ValueNotifier<SubjectDetailState> {
       return null;
     }
 
-    value = value.copyWith(
+    _setValue(value.copyWith(
       loadingEpisodeIds: <int>[...value.loadingEpisodeIds, episodeId],
-    );
+    ));
     try {
       final episode = await _repository.getEpisodeDetail(episodeId);
       final details = <int, Episode>{...value.episodeDetails, episodeId: episode};
-      value = value.copyWith(
+      _setValue(value.copyWith(
         episodeDetails: details,
         loadingEpisodeIds: value.loadingEpisodeIds
             .where((item) => item != episodeId)
             .toList(growable: false),
-      );
+      ));
       return episode;
     } catch (error) {
-      value = value.copyWith(
+      _setValue(value.copyWith(
         error: error.toString(),
         loadingEpisodeIds: value.loadingEpisodeIds
             .where((item) => item != episodeId)
             .toList(growable: false),
-      );
+      ));
       return null;
     }
   }
+
+  void _setValue(SubjectDetailState nextValue) {
+    if (_isDisposed) {
+      return;
+    }
+    value = nextValue;
+  }
+
+  @override
+  void dispose() {
+    _isDisposed = true;
+    super.dispose();
+    }
 }
 
 typedef SubjectDetailStoreFactory = SubjectDetailStore Function();

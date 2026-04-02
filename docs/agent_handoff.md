@@ -68,7 +68,8 @@ lib/
 - 流式输出
 - 基础日志
 - 请求 URL 规范化
-- 工具/响应 JSON 解析
+- SSE 增量解析
+- 原生 function calling 请求/响应处理
 
 关键文件：
 
@@ -77,18 +78,19 @@ lib/
 
 说明：
 
-- 当前只支持文本输入 + tool calling
+- 当前只支持文本输入 + function calling
 - 没有多模态上传、图片输入或视觉模型接入
 - `LlmProvider` 抽象已移除，`Agent` 直接依赖 `OpenAICompatibleLlmProvider`
 
 ### 3. Agent
 
-当前实现是显式 ReAct 风格的本地 Agent loop：
+当前实现是客户端侧的 function calling Agent loop：
 
-- 模型输出 JSON 决策
-- 客户端按步骤执行工具
-- 工具结果作为 Observation 回给模型
-- 最后输出 `final_answer`
+- 请求体带 `tools`
+- 模型通过 `tool_calls` 触发工具调用
+- 客户端执行工具后用 `role=tool` 回填 observation
+- assistant 文本与工具调用统一组织为 timeline
+- 所有可见消息都按线性消息流在 UI 展示
 
 关键文件：
 
@@ -110,10 +112,20 @@ lib/
 
 当前行为特点：
 
+- Agent loop 已收敛成 message-driven 结构
 - `present_recommendations` 是可选的，不再强制调用
-- 工具错误会结构化回馈给模型，让模型自行修正参数重试
+- 工具错误会结构化回馈给模型，模型自行决定继续调用、调整参数或直接回答
 - 搜索类工具支持 `limit`
 - 搜索排序做了合法值收口
+- 已移除 recommendation/finalization/retry/max-turn 等运行时特判
+- 当前 `AgentReplyUpdate` 只保留：
+  - `timeline`
+  - `recommendations`
+  - `isFinal`
+- `timeline` 是当前真正的消息主通道：
+  - `assistant`
+  - `toolCall`
+- `AgentReply` 和非流式 `sendUserMessage()` 已删除
 - Agent 仍然完全运行在客户端
 
 ### 4. UI
@@ -136,14 +148,16 @@ lib/
 聊天页当前特性：
 
 - `CustomScrollView + Sliver` 实现
-- Markdown 渲染
-- 流式回答
+- 所有 assistant 文本按 timeline 线性显示
+- 工具调用在线性消息流中显示为普通链接文本：`调用 xxx`
+- 点击工具调用可弹窗查看 `Action / Observation`
 - “停止生成”按钮
-- ReAct 过程显示在气泡外部上方，默认折叠
-- ReAct 每一步点开弹窗查看 `Thought / Action / Observation`
-- 推荐卡片在最终回答完成后才显示
-- 推荐卡片区域已从气泡中独立出来
+- 不再显示 `thought`
+- 不再使用旧的 ReAct 折叠框/步骤列表组件
+- 推荐卡片附着在当前 assistant 消息下方
 - 自动滚动只在用户当前位于底部附近时触发
+- 工具调用默认无气泡背景
+- assistant 最终文本与中间 assistant 文本现在统一按消息流展示，不再走单独 `text` 通道
 
 详情页当前特性：
 
@@ -195,6 +209,8 @@ lib/
 - 聊天页使用 `StreamBuilder` 驱动消息区
 - 发现页 / 设置页 / 详情页使用 `ValueListenableBuilder`
 - 当前 `AppScope` 更像轻量依赖注入容器，不是 controller
+- 当前阶段不建议为“更标准”而专门迁到 Provider
+- 如果未来真的要升级状态管理，优先重新评估 Riverpod，而不是先迁 Provider
 
 ## 最近完成的重要改动
 
@@ -205,6 +221,17 @@ lib/
 - `BangumiRepositoryImpl` 已移除
 - `ConfigRepository` / `LlmProvider` 接口层已移除
 - 全部测试文件已移除
+- Agent 已从“文本 ReAct JSON 协议”迁到原生 function calling
+- `present_recommendations` 优化为优先复用已拿到的 `Subject` 缓存，并允许部分成功
+- 详情页提前退出时，已修复 `SubjectDetailStore` dispose 后异步回写崩溃
+- Agent loop 已重构为更短的 message-driven function-calling loop
+- `steps`、`toolTraces`、`processText`、`statusText` 已从主消息/UI链路移除
+- `ChatMessage` 当前主字段已收敛为：
+  - `content`（用户/错误消息）
+  - `timeline`
+  - `recommendations`
+  - `isLoading / isError`
+- 聊天页已改成线性消息流 UI，不再使用旧的 ReAct 折叠面板
 
 ## 已修复过的重要问题
 
@@ -220,6 +247,13 @@ lib/
 - ReAct 面板过长、内容过重的问题
 - 推荐卡片布局 overflow
 - episode 列表请求时错误发送 `type=null` 导致 Bangumi 400
+- Widget Inspector 触发 `late final _store` 二次初始化崩溃
+- 详情页未加载完就退出导致 `SubjectDetailStore was used after being disposed`
+- recommendation 工具末尾补详情时，单次 TLS/握手失败导致整组推荐卡片失败
+- 最终正文跑进工具调用 Thought、final answer 只剩一句总结的问题
+- 聊天气泡下方多余的 loading 状态条闪现
+- 工具调用与中间 assistant 文本顺序错乱的问题
+- 工具调用仍保留卡片背景、不符合线性消息流设计的问题
 
 ## 当前明确存在的取舍/不足
 
@@ -235,6 +269,9 @@ lib/
 - LLM 调用仍在客户端
 - API key / base URL 仍由客户端本地维护
 - 这是原型方案，不是最终生产设计
+- 当前 assistant 文本和 tool call 已统一进 timeline，但对“最终答案提交边界”还没有单独协议动作
+- 目前仍可能出现“模型在调用 recommendation 前先输出较长正文”的问题，当前主要通过 prompt 约束缓解
+- 本地 Agent 中断后，不支持真正恢复未完成轮次；设计上更接近“保住用户输入，丢弃未完成回复”
 
 ### 数据能力
 
@@ -247,12 +284,15 @@ lib/
 - 当前没有会话级断点恢复
 - 断网后不能从“第 N 步 Observation”继续跑
 - 失败后只能保留已显示内容与错误态，无法精确续传
+- Bangumi API 目前只做了 recommendation 补全链路的局部稳健化，还没有统一的网络重试/退避策略
 
 ### 配置/安全
 
 - API key 还没迁到安全存储
 - 没有 OAuth
 - 没有写操作权限边界体系
+- 会话数据仍未正式持久化到本地数据库
+- 还没有多会话支持与会话恢复
 
 ### 测试与质量保障
 
@@ -278,10 +318,11 @@ lib/
 - 当前 Agent 放在客户端是为了快速验证交互闭环
 - 真正产品化时，主 Agent 更适合迁到服务端
 - 客户端重点展示的是：
-  - 流式渲染
+  - function calling 驱动的 ReAct 闭环
+  - 线性消息流渲染
   - 页面状态管理
-  - ReAct 过程可视化
-  - 推荐结果与正文联动
+  - tool call / observation 可视化
+  - 推荐结果与消息流联动
   - 错误态与中断处理
   - 单集列表与单集详情交互
 
@@ -289,35 +330,60 @@ lib/
 
 优先级从高到低建议如下：
 
-1. 继续梳理依赖注入与状态管理边界
-   - 评估是否切到 Riverpod/Provider
-   - 避免 `AppDependencies` 继续膨胀
+1. 会话数据持久化
+   - 引入 `drift + SQLite`
+   - 建立：
+     - `sessions`
+     - `messages`
+     - `timeline_items`
+     - `message_recommendations`
+   - 目标是多会话、历史恢复、本地缓存
 
-2. 重新梳理 Agent 与客户端边界
-   - 准备服务端化方案
-   - 客户端只保留展示与本地动作执行
+2. 网络层升级
+   - 迁到 `Dio`
+   - 为后续 multi-host / OAuth / interceptor / retry / cancel 做准备
 
-3. 补更强的恢复与弱网方案
-   - session/turn/action 状态建模
-   - 中断恢复
-   - pending action
+3. Bangumi 后端能力分层
+   - 不再继续扩张单一大 repository
+   - 拆成：
+     - `SearchApi`
+     - `SubjectApi`
+     - `EpisodeApi`
+     - `UserApi`
+     - `CollectionApi`
+     - `AuthApi`
+   - 上层增加一个统一的 `BangumiGateway`
 
-4. 配置安全化
-   - API key 改为安全存储
+4. 认证模块独立
+   - OAuth 作为横切能力独立出来
+   - 不和 public/private API 强绑定
+   - 规划：
+     - `AuthSession`
+     - `TokenRepository`
+     - `BangumiAuthApi`
+     - `AuthService/AuthStore`
 
-5. 评估是否需要重新引入少量高价值测试
-   - 仅保留能挡住真实回归的少量测试
+5. 会话/Agent 数据流继续收敛
+   - 保持 message-driven loop
+   - 如果后面要继续解决“最终答案边界”，优先考虑协议层动作，而不是再加业务特判
+
+6. 评估导航结构升级
+   - 主 Tab 后续若要独立保存状态和子页面栈，采用：
+     - `IndexedStack`
+     - 每个 Tab 一个独立 `Navigator`
 
 ## 建议下一个 Agent 先做什么
 
-如果下一个 Agent 接手，建议先从“继续收敛架构边界，不改核心行为”开始：
+如果下一个 Agent 接手，建议先从“后端基础设施”开始，而不是继续动聊天页表现层：
 
-1. 明确 `AppScope` 是否继续保留
-2. 如果继续扩展功能，优先按 feature 维度而不是再堆全局依赖
-3. 如果要继续加 LLM 能力，先决定是否支持多模态
-4. 不建议一上来同时做：
-   - 服务端化
-   - 状态管理框架迁移
-   - 大规模 UI 重做
+1. 先设计本地会话数据表结构和 `SessionRepository`
+2. 再评估并落地 `Dio` 迁移
+3. 梳理 Bangumi public/private API 的能力映射
+4. 预留 OAuth 模块边界，但不要先把 UI 做复杂
+5. 当前不建议一上来同时做：
+   - Riverpod 迁移
+   - 服务端化 Agent
+   - private API 全量替换
+   - 大规模前端重写
 
-否则容易把当前可运行闭环重新打散。
+优先把数据存储、网络层、auth/API 分层这三块地基收稳。

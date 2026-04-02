@@ -16,6 +16,7 @@ class DiscoveryPage extends StatefulWidget {
 class _DiscoveryPageState extends State<DiscoveryPage> {
   late final TextEditingController _searchController;
   late final DiscoveryStore _store;
+  bool _hasBoundStore = false;
 
   @override
   void initState() {
@@ -26,7 +27,10 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _store = AppScope.of(context).discoveryStore;
+    if (!_hasBoundStore) {
+      _store = AppScope.of(context).discoveryStore;
+      _hasBoundStore = true;
+    }
     if (!_store.value.hasLoadedFeatured && !_store.value.isLoading) {
       _store.loadFeatured();
     }
@@ -49,43 +53,16 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF0E5F64), Color(0xFF6AA694)],
+            SearchBar(
+              controller: _searchController,
+              hintText: '搜索番剧、题材或关键词',
+              trailing: [
+                IconButton(
+                  onPressed: () => _store.search(_searchController.text),
+                  icon: const Icon(Icons.search),
                 ),
-                borderRadius: BorderRadius.circular(28),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '发现下一部想看的番',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    '先用 Bangumi 榜单和搜索构建内容底座，后续聊天页会把这些能力暴露给 Agent。',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                  const SizedBox(height: 16),
-                  SearchBar(
-                    controller: _searchController,
-                    hintText: '搜索番剧、题材或关键词',
-                    trailing: [
-                      IconButton(
-                        onPressed: () => _store.search(_searchController.text),
-                        icon: const Icon(Icons.search),
-                      ),
-                    ],
-                    onSubmitted: _store.search,
-                  ),
-                ],
-              ),
+              ],
+              onSubmitted: _store.search,
             ),
             const SizedBox(height: 20),
             if (state.isLoading)

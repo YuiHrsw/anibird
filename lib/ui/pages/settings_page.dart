@@ -17,6 +17,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _modelController;
   late final TextEditingController _userAgentController;
   late final SettingsStore _store;
+  bool _hasBoundStore = false;
   bool _debugTrace = true;
   bool _hasSyncedInitialConfig = false;
 
@@ -32,7 +33,10 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _store = AppScope.of(context).settingsStore;
+    if (!_hasBoundStore) {
+      _store = AppScope.of(context).settingsStore;
+      _hasBoundStore = true;
+    }
     if (!_store.value.isLoaded) {
       _store.load();
     }

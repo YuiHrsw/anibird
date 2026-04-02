@@ -61,6 +61,12 @@ class OpenAICompatibleLlmProvider {
         'LLM response status=${response.statusCode} body=$text',
         name: 'anibird.llm',
       );
+      if (request.tools.isNotEmpty &&
+          (response.statusCode == 400 || response.statusCode == 422)) {
+        throw LlmConfigurationException(
+          '当前模型或网关不支持 function calling / tools 请求格式：$text',
+        );
+      }
       throw LlmConfigurationException(
         'LLM request failed (${response.statusCode}): $text',
       );

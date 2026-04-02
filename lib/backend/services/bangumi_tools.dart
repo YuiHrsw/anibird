@@ -11,10 +11,23 @@ const int _defaultEpisodeLimit = 10;
 const int _defaultRecommendationLimit = 5;
 const int _maxListLimit = 12;
 
+class SubjectSnapshotCache {
+  final Map<int, Subject> _subjectsById = <int, Subject>{};
+
+  void rememberAll(Iterable<Subject> subjects) {
+    for (final subject in subjects) {
+      _subjectsById[subject.id] = subject;
+    }
+  }
+
+  Subject? get(int id) => _subjectsById[id];
+}
+
 class SearchAnimeTool implements AgentTool {
-  SearchAnimeTool(this._repository);
+  SearchAnimeTool(this._repository, this._cache);
 
   final BangumiRepository _repository;
+  final SubjectSnapshotCache _cache;
 
   @override
   ToolDefinition get definition => const ToolDefinition(
@@ -52,6 +65,7 @@ class SearchAnimeTool implements AgentTool {
         limit: _boundedLimit(input['limit'], fallback: _defaultListLimit),
       ),
     );
+    _cache.rememberAll(result.data);
     return ToolResult(
       toolName: definition.name,
       summary: '找到 ${result.data.length} 个候选条目。',
@@ -66,9 +80,10 @@ class SearchAnimeTool implements AgentTool {
 }
 
 class SearchSubjectsByTagsTool implements AgentTool {
-  SearchSubjectsByTagsTool(this._repository);
+  SearchSubjectsByTagsTool(this._repository, this._cache);
 
   final BangumiRepository _repository;
+  final SubjectSnapshotCache _cache;
 
   @override
   ToolDefinition get definition => const ToolDefinition(
@@ -107,6 +122,7 @@ class SearchSubjectsByTagsTool implements AgentTool {
         limit: _boundedLimit(input['limit'], fallback: _defaultListLimit),
       ),
     );
+    _cache.rememberAll(result.data);
     return ToolResult(
       toolName: definition.name,
       summary: '按标签找到 ${result.data.length} 个更相关的候选条目。',
@@ -121,9 +137,10 @@ class SearchSubjectsByTagsTool implements AgentTool {
 }
 
 class GetSubjectDetailTool implements AgentTool {
-  GetSubjectDetailTool(this._repository);
+  GetSubjectDetailTool(this._repository, this._cache);
 
   final BangumiRepository _repository;
+  final SubjectSnapshotCache _cache;
 
   @override
   ToolDefinition get definition => const ToolDefinition(
@@ -143,6 +160,7 @@ class GetSubjectDetailTool implements AgentTool {
     final subject = await _repository.getSubjectDetail(
       _asInt(input['subject_id']),
     );
+    _cache.rememberAll([subject]);
     final payload = {'subject': subject.toJson()};
     return ToolResult(
       toolName: definition.name,
@@ -155,9 +173,10 @@ class GetSubjectDetailTool implements AgentTool {
 }
 
 class GetRelatedSubjectsTool implements AgentTool {
-  GetRelatedSubjectsTool(this._repository);
+  GetRelatedSubjectsTool(this._repository, this._cache);
 
   final BangumiRepository _repository;
+  final SubjectSnapshotCache _cache;
 
   @override
   ToolDefinition get definition => const ToolDefinition(
@@ -179,6 +198,7 @@ class GetRelatedSubjectsTool implements AgentTool {
         (await _repository.getRelatedSubjects(_asInt(input['subject_id'])))
             .take(_boundedLimit(input['limit'], fallback: _defaultListLimit))
             .toList(growable: false);
+    _cache.rememberAll(subjects);
     return ToolResult(
       toolName: definition.name,
       summary: '获取到 ${subjects.length} 个关联条目。',
@@ -310,9 +330,10 @@ class GetEpisodeDetailTool implements AgentTool {
 }
 
 class BrowseSubjectsTool implements AgentTool {
-  BrowseSubjectsTool(this._repository);
+  BrowseSubjectsTool(this._repository, this._cache);
 
   final BangumiRepository _repository;
+  final SubjectSnapshotCache _cache;
 
   @override
   ToolDefinition get definition => const ToolDefinition(
@@ -339,6 +360,7 @@ class BrowseSubjectsTool implements AgentTool {
         limit: _boundedLimit(input['limit'], fallback: _defaultBrowseLimit),
       ),
     );
+    _cache.rememberAll(result.data);
     return ToolResult(
       toolName: definition.name,
       summary: '浏览结果共返回 ${result.data.length} 个条目。',
@@ -353,9 +375,10 @@ class BrowseSubjectsTool implements AgentTool {
 }
 
 class PresentRecommendationsTool implements AgentTool {
-  PresentRecommendationsTool(this._repository);
+  PresentRecommendationsTool(this._repository, this._cache);
 
   final BangumiRepository _repository;
+  final SubjectSnapshotCache _cache;
 
   @override
   ToolDefinition get definition => const ToolDefinition(
@@ -388,20 +411,36 @@ class PresentRecommendationsTool implements AgentTool {
     );
     final selectedIds = ids.take(limit).toList(growable: false);
     final subjects = <Subject>[];
-    final resolved = <Map<String, dynamic>>[];
+    final failedSubjectIds = <int>[];
+    final failureMessages = <String>[];
     for (final id in selectedIds) {
-      final subject = await _repository.getSubjectDetail(id);
-      subjects.add(subject);
-      resolved.add(subject.toJson());
+      final cached = _cache.get(id);
+      if (cached != null) {
+        subjects.add(cached);
+        continue;
+      }
+      try {
+        final subject = await _repository.getSubjectDetail(id);
+        _cache.rememberAll([subject]);
+        subjects.add(subject);
+      } catch (error) {
+        failedSubjectIds.add(id);
+        failureMessages.add('subject_id=$id: $error');
+      }
     }
     final payload = {
-      'ok': true,
+      'ok': failedSubjectIds.isEmpty,
+      'partial': failedSubjectIds.isNotEmpty,
       'submitted_subject_ids': selectedIds,
       'resolved_count': subjects.length,
+      'failed_subject_ids': failedSubjectIds,
+      if (failureMessages.isNotEmpty) 'failures': failureMessages,
     };
     return ToolResult(
       toolName: definition.name,
-      summary: '已提交 ${subjects.length} 个最终推荐条目用于展示。',
+      summary: failedSubjectIds.isEmpty
+          ? '已提交 ${subjects.length} 个最终推荐条目用于展示。'
+          : '已提交 ${subjects.length} 个最终推荐条目，${failedSubjectIds.length} 个条目补全失败。',
       payload: payload,
       observationText: _payloadObservation(
         label: 'Present recommendations result',
@@ -413,16 +452,17 @@ class PresentRecommendationsTool implements AgentTool {
 }
 
 List<AgentTool> buildBangumiTools(BangumiRepository repository) {
+  final cache = SubjectSnapshotCache();
   return [
-    SearchAnimeTool(repository),
-    SearchSubjectsByTagsTool(repository),
-    GetSubjectDetailTool(repository),
-    GetRelatedSubjectsTool(repository),
+    SearchAnimeTool(repository, cache),
+    SearchSubjectsByTagsTool(repository, cache),
+    GetSubjectDetailTool(repository, cache),
+    GetRelatedSubjectsTool(repository, cache),
     GetSubjectCastTool(repository),
     GetSubjectEpisodesTool(repository),
     GetEpisodeDetailTool(repository),
-    BrowseSubjectsTool(repository),
-    PresentRecommendationsTool(repository),
+    BrowseSubjectsTool(repository, cache),
+    PresentRecommendationsTool(repository, cache),
   ];
 }
 

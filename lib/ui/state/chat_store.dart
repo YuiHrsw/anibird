@@ -62,7 +62,7 @@ class ChatStore {
       ChatMessage(
         id: loadingId,
         role: ChatRole.assistant,
-        content: '正在检索 Bangumi 并组织回答...',
+        content: '',
         isLoading: true,
       ),
     ];
@@ -96,11 +96,9 @@ class ChatStore {
           ChatMessage(
             id: loadingId,
             role: ChatRole.assistant,
-            content: update.text.isEmpty ? existing.content : update.text,
+            content: existing.content,
+            timeline: update.timeline,
             recommendations: update.recommendations,
-            toolTraces: update.toolTraces,
-            steps: update.steps,
-            statusText: update.statusText,
             isLoading: !update.isFinal,
           ),
         );
@@ -121,7 +119,6 @@ class ChatStore {
           content: _messageById(loadingId).content.isEmpty
               ? '请求失败：$error'
               : _messageById(loadingId).content,
-          statusText: null,
           isError: true,
         ),
       );
@@ -135,10 +132,7 @@ class ChatStore {
 
     if (_stopRequested) {
       final current = _messageById(loadingId);
-      _replaceMessage(
-        loadingId,
-        current.copyWith(isLoading: false, statusText: '已手动停止'),
-      );
+      _replaceMessage(loadingId, current.copyWith(isLoading: false));
     }
 
     _emit(
