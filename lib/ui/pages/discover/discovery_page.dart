@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../../app/app_scope.dart';
-import '../../backend/models/subject.dart';
-import '../state/discovery_store.dart';
-import '../widgets/subject_card.dart';
-import 'subject_detail_page.dart';
+import '../../../app/app_scope.dart';
+import '../../../backend/models/subject.dart';
+import '../../state/discovery_store.dart';
+import '../../widgets/subject_card.dart';
+import '../subject_detail_page.dart';
 
 class DiscoveryPage extends StatefulWidget {
   const DiscoveryPage({super.key});
@@ -47,21 +47,27 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
     return ValueListenableBuilder<DiscoveryState>(
       valueListenable: _store,
       builder: (context, state, _) {
+        final colorScheme = Theme.of(context).colorScheme;
         final List<Subject> displayItems = state.keyword.isEmpty
             ? state.featured
             : state.searchResults;
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            SearchBar(
+            TextField(
               controller: _searchController,
-              hintText: '搜索番剧、题材或关键词',
-              trailing: [
-                IconButton(
-                  onPressed: () => _store.search(_searchController.text),
-                  icon: const Icon(Icons.search),
+              decoration: InputDecoration(
+                hintText: '搜索番剧、题材或关键词',
+                prefixIcon: const Icon(Icons.search),
+                border: const OutlineInputBorder(),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: colorScheme.outlineVariant),
                 ),
-              ],
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: colorScheme.primary),
+                ),
+                filled: false,
+              ),
               onSubmitted: _store.search,
             ),
             const SizedBox(height: 20),
@@ -83,17 +89,25 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
               const SizedBox(height: 12),
               ...displayItems.map(
                 (subject) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: SubjectCard(
-                    subject: subject,
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) =>
-                              SubjectDetailPage(subjectId: subject.id),
-                        ),
-                      );
-                    },
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Column(
+                    children: [
+                      SubjectCard(
+                        subject: subject,
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) =>
+                                  SubjectDetailPage(subjectId: subject.id),
+                            ),
+                          );
+                        },
+                      ),
+                      Divider(
+                        height: 1,
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
+                    ],
                   ),
                 ),
               ),

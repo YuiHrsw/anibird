@@ -13,6 +13,7 @@ class Episode {
     required this.disc,
     this.subjectId,
     this.durationSeconds = 0,
+    this.collection,
   });
 
   final int id;
@@ -28,6 +29,7 @@ class Episode {
   final int disc;
   final int? subjectId;
   final int durationSeconds;
+  final EpisodeCollection? collection;
 
   String get displayName => nameCn.isNotEmpty ? nameCn : name;
 
@@ -46,6 +48,11 @@ class Episode {
       disc: _asInt(json['disc']),
       subjectId: json['subject_id'] == null ? null : _asInt(json['subject_id']),
       durationSeconds: _asInt(json['duration_seconds']),
+      collection: (json['collection'] as Map?) == null
+          ? null
+          : EpisodeCollection.fromJson(
+              (json['collection'] as Map).cast<String, dynamic>(),
+            ),
     );
   }
 
@@ -64,7 +71,32 @@ class Episode {
       'disc': disc,
       'subject_id': subjectId,
       'duration_seconds': durationSeconds,
+      'collection': collection == null
+          ? null
+          : {
+              'status': collection!.status,
+              'updatedAt': collection!.updatedAt,
+            },
     };
+  }
+}
+
+class EpisodeCollection {
+  const EpisodeCollection({
+    required this.status,
+    this.updatedAt,
+  });
+
+  final int status;
+  final int? updatedAt;
+
+  bool get isDone => status == 2;
+
+  factory EpisodeCollection.fromJson(Map<String, dynamic> json) {
+    return EpisodeCollection(
+      status: _asInt(json['status']),
+      updatedAt: json['updatedAt'] == null ? null : _asInt(json['updatedAt']),
+    );
   }
 }
 

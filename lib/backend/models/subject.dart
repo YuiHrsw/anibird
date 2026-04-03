@@ -60,6 +60,49 @@ class SubjectCollectionStats {
   }
 }
 
+class SubjectInterest {
+  const SubjectInterest({
+    required this.id,
+    required this.rate,
+    required this.type,
+    required this.comment,
+    required this.tags,
+    required this.updatedAt,
+    this.epStatus = 0,
+    this.volStatus = 0,
+    this.isPrivate = false,
+  });
+
+  final int id;
+  final int rate;
+  final int type;
+  final String comment;
+  final List<String> tags;
+  final int updatedAt;
+  final int epStatus;
+  final int volStatus;
+  final bool isPrivate;
+
+  factory SubjectInterest.fromJson(Map<String, dynamic>? json) {
+    final data = json ?? const <String, dynamic>{};
+    return SubjectInterest(
+      id: _asInt(data['id']),
+      rate: _asInt(data['rate']),
+      type: _asInt(data['type']),
+      comment: data['comment']?.toString() ?? '',
+      tags: (data['tags'] as List?)
+              ?.map((item) => item.toString())
+              .where((item) => item.isNotEmpty)
+              .toList() ??
+          const <String>[],
+      updatedAt: _asInt(data['updatedAt']),
+      epStatus: _asInt(data['epStatus']),
+      volStatus: _asInt(data['volStatus']),
+      isPrivate: data['private'] as bool? ?? false,
+    );
+  }
+}
+
 class Subject {
   const Subject({
     required this.id,
@@ -79,6 +122,7 @@ class Subject {
     required this.eps,
     required this.relation,
     required this.collectionStats,
+    this.interest,
   });
 
   final int id;
@@ -98,6 +142,7 @@ class Subject {
   final int eps;
   final String? relation;
   final SubjectCollectionStats collectionStats;
+  final SubjectInterest? interest;
 
   String get displayName => nameCn.isNotEmpty ? nameCn : name;
 
@@ -111,6 +156,7 @@ class Subject {
     final collection = SubjectCollectionStats.fromJson(
       (json['collection'] as Map?)?.cast<String, dynamic>(),
     );
+    final interest = (json['interest'] as Map?)?.cast<String, dynamic>();
     final tags =
         (json['tags'] as List?)
             ?.whereType<Map>()
@@ -136,6 +182,7 @@ class Subject {
       date: json['date']?.toString() ?? '',
       platform: json['platform']?.toString() ?? '',
       image:
+          json['image']?.toString() ??
           images['large']?.toString() ??
           images['common']?.toString() ??
           images['medium']?.toString() ??
@@ -153,6 +200,7 @@ class Subject {
       eps: _asInt(json['eps']),
       relation: json['relation']?.toString(),
       collectionStats: collection,
+      interest: interest == null ? null : SubjectInterest.fromJson(interest),
     );
   }
 
@@ -170,6 +218,19 @@ class Subject {
       'score': score,
       'total': total,
       'relation': relation,
+      'interest': interest == null
+          ? null
+          : {
+              'id': interest!.id,
+              'rate': interest!.rate,
+              'type': interest!.type,
+              'comment': interest!.comment,
+              'tags': interest!.tags,
+              'updatedAt': interest!.updatedAt,
+              'epStatus': interest!.epStatus,
+              'volStatus': interest!.volStatus,
+              'private': interest!.isPrivate,
+            },
       'tags': tags
           .map((tag) => {'name': tag.name, 'count': tag.count})
           .toList(growable: false),

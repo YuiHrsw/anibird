@@ -23,6 +23,7 @@ class ToolResult {
     required this.payload,
     required this.observationText,
     this.subjects = const <Subject>[],
+    this.recommendationSubjectIds = const <int>[],
   });
 
   final String toolName;
@@ -30,6 +31,7 @@ class ToolResult {
   final Map<String, dynamic> payload;
   final String observationText;
   final List<Subject> subjects;
+  final List<int> recommendationSubjectIds;
 
   String get jsonContent => jsonEncode(payload);
 }

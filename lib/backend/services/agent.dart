@@ -14,13 +14,15 @@ class ChatContext {
 
 class AgentReplyUpdate {
   const AgentReplyUpdate({
-    required this.timeline,
+    required this.contents,
     required this.recommendations,
+    required this.recommendationSubjectIds,
     required this.isFinal,
   });
 
-  final List<ChatTimelineItem> timeline;
+  final List<ChatContentItem> contents;
   final List<Subject> recommendations;
+  final List<int> recommendationSubjectIds;
   final bool isFinal;
 }
 
@@ -44,15 +46,17 @@ class Agent {
       ...context.history.map(_historyToLlm),
       LlmMessage(role: 'user', content: text),
     ];
-    final timeline = <ChatTimelineItem>[];
+    final contents = <ChatContentItem>[];
     var recommendations = <Subject>[];
+    var recommendationSubjectIds = <int>[];
 
     var turn = 0;
     while (true) {
       if (shouldStop?.call() ?? false) {
         yield AgentReplyUpdate(
-          timeline: timeline,
+          contents: contents,
           recommendations: recommendations,
+          recommendationSubjectIds: recommendationSubjectIds,
           isFinal: true,
         );
         return;
@@ -64,34 +68,35 @@ class Agent {
       );
       ChatResponse? response;
       var assistantText = '';
-      final assistantTimelineId = 'assistant-turn-$turn';
+      final assistantContentId = 'assistant-turn-$turn';
       var hasAssistantTimeline = false;
       await for (final event in _llmProvider.streamChat(request)) {
         if (event.contentDelta.isNotEmpty) {
           assistantText = event.response.content.trim();
           if (assistantText.isNotEmpty) {
             if (!hasAssistantTimeline) {
-              timeline.add(
-                ChatTimelineItem.assistant(
-                  id: assistantTimelineId,
+              contents.add(
+                ChatContentItem.text(
+                  id: assistantContentId,
                   content: assistantText,
                 ),
               );
               hasAssistantTimeline = true;
             } else {
-              final timelineIndex = timeline.lastIndexWhere(
-                (item) => item.id == assistantTimelineId,
+              final timelineIndex = contents.lastIndexWhere(
+                (item) => item.id == assistantContentId,
               );
               if (timelineIndex != -1) {
-                timeline[timelineIndex] = timeline[timelineIndex].copyWith(
+                contents[timelineIndex] = contents[timelineIndex].copyWith(
                   content: assistantText,
                 );
               }
             }
           }
           yield AgentReplyUpdate(
-            timeline: timeline,
+            contents: contents,
             recommendations: recommendations,
+            recommendationSubjectIds: recommendationSubjectIds,
             isFinal: false,
           );
         }
@@ -112,16 +117,17 @@ class Agent {
         }
         messages.add(LlmMessage(role: 'assistant', content: assistantText));
         if (!hasAssistantTimeline && assistantText.isNotEmpty) {
-          timeline.add(
-            ChatTimelineItem.assistant(
-              id: assistantTimelineId,
+          contents.add(
+            ChatContentItem.text(
+              id: assistantContentId,
               content: assistantText,
             ),
           );
         }
         yield AgentReplyUpdate(
-          timeline: timeline,
+          contents: contents,
           recommendations: recommendations,
+          recommendationSubjectIds: recommendationSubjectIds,
           isFinal: true,
         );
         return;
@@ -138,8 +144,9 @@ class Agent {
       for (final toolCall in response.toolCalls) {
         if (shouldStop?.call() ?? false) {
           yield AgentReplyUpdate(
-            timeline: timeline,
+            contents: contents,
             recommendations: recommendations,
+            recommendationSubjectIds: recommendationSubjectIds,
             isFinal: true,
           );
           return;
@@ -148,8 +155,8 @@ class Agent {
         final actionName = toolCall.name;
         final execution = await _executeToolCall(toolCall);
         messages.add(execution.toolMessage);
-        timeline.add(
-          ChatTimelineItem.toolCall(
+        contents.add(
+          ChatContentItem.toolCall(
             id: toolCall.id,
             action: actionName,
             actionInputJson: execution.actionInputJson,
@@ -160,9 +167,14 @@ class Agent {
           current: recommendations,
           incoming: execution.subjects,
         );
+        recommendationSubjectIds = _mergeRecommendationIds(
+          current: recommendationSubjectIds,
+          incoming: execution.recommendationSubjectIds,
+        );
         yield AgentReplyUpdate(
-          timeline: timeline,
+          contents: contents,
           recommendations: recommendations,
+          recommendationSubjectIds: recommendationSubjectIds,
           isFinal: false,
         );
       }
@@ -268,18 +280,30 @@ List<Subject> _mergeRecommendations({
   return incoming;
 }
 
+List<int> _mergeRecommendationIds({
+  required List<int> current,
+  required List<int> incoming,
+}) {
+  if (incoming.isEmpty) {
+    return current;
+  }
+  return incoming;
+}
+
 class _ToolExecutionResult {
   const _ToolExecutionResult({
     required this.toolMessage,
     required this.actionInputJson,
     required this.subjects,
     required this.observationJson,
+    required this.recommendationSubjectIds,
   });
 
   final LlmMessage toolMessage;
   final String actionInputJson;
   final List<Subject> subjects;
   final String observationJson;
+  final List<int> recommendationSubjectIds;
 
   factory _ToolExecutionResult.success({
     required String toolCallId,
@@ -296,6 +320,7 @@ class _ToolExecutionResult {
       actionInputJson: _prettyJson(input),
       subjects: result.subjects,
       observationJson: formatStructuredData(result.payload, label: 'Observation'),
+      recommendationSubjectIds: result.recommendationSubjectIds,
     );
   }
 
@@ -316,6 +341,7 @@ class _ToolExecutionResult {
       actionInputJson: _prettyJson(input),
       subjects: const <Subject>[],
       observationJson: formatStructuredData(payload, label: 'Observation'),
+      recommendationSubjectIds: const <int>[],
     );
   }
 }

@@ -375,9 +375,8 @@ class BrowseSubjectsTool implements AgentTool {
 }
 
 class PresentRecommendationsTool implements AgentTool {
-  PresentRecommendationsTool(this._repository, this._cache);
+  PresentRecommendationsTool(this._cache);
 
-  final BangumiRepository _repository;
   final SubjectSnapshotCache _cache;
 
   @override
@@ -410,43 +409,34 @@ class PresentRecommendationsTool implements AgentTool {
       fallback: _defaultRecommendationLimit,
     );
     final selectedIds = ids.take(limit).toList(growable: false);
-    final subjects = <Subject>[];
-    final failedSubjectIds = <int>[];
-    final failureMessages = <String>[];
+    final cachedSubjects = <Subject>[];
+    final unresolvedSubjectIds = <int>[];
     for (final id in selectedIds) {
       final cached = _cache.get(id);
       if (cached != null) {
-        subjects.add(cached);
+        cachedSubjects.add(cached);
         continue;
       }
-      try {
-        final subject = await _repository.getSubjectDetail(id);
-        _cache.rememberAll([subject]);
-        subjects.add(subject);
-      } catch (error) {
-        failedSubjectIds.add(id);
-        failureMessages.add('subject_id=$id: $error');
-      }
+      unresolvedSubjectIds.add(id);
     }
     final payload = {
-      'ok': failedSubjectIds.isEmpty,
-      'partial': failedSubjectIds.isNotEmpty,
+      'ok': true,
       'submitted_subject_ids': selectedIds,
-      'resolved_count': subjects.length,
-      'failed_subject_ids': failedSubjectIds,
-      if (failureMessages.isNotEmpty) 'failures': failureMessages,
+      'resolved_count': cachedSubjects.length,
+      'unresolved_subject_ids': unresolvedSubjectIds,
     };
     return ToolResult(
       toolName: definition.name,
-      summary: failedSubjectIds.isEmpty
-          ? '已提交 ${subjects.length} 个最终推荐条目用于展示。'
-          : '已提交 ${subjects.length} 个最终推荐条目，${failedSubjectIds.length} 个条目补全失败。',
+      summary: unresolvedSubjectIds.isEmpty
+          ? '已提交 ${cachedSubjects.length} 个最终推荐条目用于展示。'
+          : '已提交 ${selectedIds.length} 个最终推荐条目，卡片内容将异步补全。',
       payload: payload,
       observationText: _payloadObservation(
         label: 'Present recommendations result',
         payload: payload,
       ),
-      subjects: subjects,
+      subjects: cachedSubjects,
+      recommendationSubjectIds: selectedIds,
     );
   }
 }
@@ -462,7 +452,7 @@ List<AgentTool> buildBangumiTools(BangumiRepository repository) {
     GetSubjectEpisodesTool(repository),
     GetEpisodeDetailTool(repository),
     BrowseSubjectsTool(repository, cache),
-    PresentRecommendationsTool(repository, cache),
+    PresentRecommendationsTool(cache),
   ];
 }
 

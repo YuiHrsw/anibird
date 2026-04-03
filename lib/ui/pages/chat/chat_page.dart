@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
-import '../../app/app_scope.dart';
-import '../../backend/models/chat_message.dart';
-import '../../backend/models/subject.dart';
-import '../state/chat_store.dart';
-import 'subject_detail_page.dart';
+import '../../../app/app_scope.dart';
+import '../../../backend/models/chat_message.dart';
+import '../../../backend/models/subject.dart';
+import '../../state/chat_store.dart';
+import '../../widgets/app_network_image.dart';
+import '../subject_detail_page.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
@@ -70,48 +71,17 @@ class _ChatPageState extends State<ChatPage> {
               child: CustomScrollView(
                 controller: _scrollController,
                 slivers: [
-                  SliverToBoxAdapter(
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-                      color: Theme.of(context).colorScheme.primaryContainer,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Amadeus',
-                            style: Theme.of(context).textTheme.headlineSmall
-                                ?.copyWith(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onPrimaryContainer,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Bangumi API 增强的 AI 问答助手',
-                            style: TextStyle(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onPrimaryContainer,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
                   if (messages.isEmpty)
                     const SliverFillRemaining(
                       hasScrollBody: false,
                       child: Center(
                         child: Padding(
                           padding: EdgeInsets.all(24),
-                          child: Text('欢迎使用 Amadeus >w<'),
+                          child: Text('欢迎使用智能助手'),
                         ),
                       ),
                     )
-                  else
+                  else ...[
                     SliverPadding(
                       padding: const EdgeInsets.all(16),
                       sliver: SliverList.separated(
@@ -124,6 +94,7 @@ class _ChatPageState extends State<ChatPage> {
                         itemCount: messages.length,
                       ),
                     ),
+                  ],
                 ],
               ),
             ),
@@ -190,59 +161,173 @@ class _ChatPageState extends State<ChatPage> {
   }
 }
 
-class _ChatMessageItem extends StatelessWidget {
+class _ChatMessageItem extends StatefulWidget {
   const _ChatMessageItem({super.key, required this.message});
 
   final ChatMessage message;
 
   @override
-  Widget build(BuildContext context) {
-    final isUser = message.role == ChatRole.user;
-    final hasVisibleAssistantText = isUser || message.isError;
+  State<_ChatMessageItem> createState() => _ChatMessageItemState();
+}
 
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 760),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (!isUser && message.timeline.isNotEmpty) ...[
-              for (final entry in message.timeline.asMap().entries) ...[
-                _TimelineItemView(index: entry.key + 1, item: entry.value),
-                const SizedBox(height: 8),
+class _ChatMessageItemState extends State<_ChatMessageItem> {
+  bool _showOlderTimeline = false;
+  int _lastTimelineCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _lastTimelineCount = widget.message.contents.length;
+  }
+
+  @override
+  void didUpdateWidget(covariant _ChatMessageItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final nextCount = widget.message.contents.length;
+    if (nextCount != _lastTimelineCount) {
+      _lastTimelineCount = nextCount;
+      if (nextCount > 1) {
+        _showOlderTimeline = false;
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final message = widget.message;
+    final isUser = message.role == ChatRole.user;
+    final contents = message.contents;
+    final olderContents =
+        contents.length > 1 ? contents.sublist(0, contents.length - 1) : const <ChatContentItem>[];
+    final latestContent = contents.isNotEmpty ? contents.last : null;
+    final messageBody = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (!isUser && olderContents.isNotEmpty)
+          _CollapsedTimelineSection(
+            itemCount: olderContents.length,
+            isExpanded: _showOlderTimeline,
+            onToggle: () {
+              setState(() {
+                _showOlderTimeline = !_showOlderTimeline;
+              });
+            },
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final entry in olderContents.asMap().entries) ...[
+                  _ContentItemView(index: entry.key + 1, item: entry.value),
+                  const SizedBox(height: 8),
+                ],
               ],
-            ],
-            if (hasVisibleAssistantText)
-              _MessageBubble(
-                isUser: isUser,
-                content: message.content,
-                isMarkdown: !isUser,
+            ),
+          ),
+        if (!isUser && latestContent != null) ...[
+          _ContentItemView(
+            index: contents.length,
+            item: latestContent,
+          ),
+          const SizedBox(height: 8),
+        ],
+        if (isUser && latestContent != null)
+          _MessageBubble(
+            isUser: isUser,
+            content: latestContent.content ?? '',
+            isMarkdown: false,
+          ),
+      ],
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (isUser)
+          Align(
+            alignment: Alignment.centerRight,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: messageBody,
+            ),
+          )
+        else
+          messageBody,
+        if (!message.isLoading && message.recommendations.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _RecommendationStrip(subjects: message.recommendations),
+        ],
+      ],
+    );
+  }
+}
+
+class _CollapsedTimelineSection extends StatelessWidget {
+  const _CollapsedTimelineSection({
+    required this.itemCount,
+    required this.isExpanded,
+    required this.onToggle,
+    required this.child,
+  });
+
+  final int itemCount;
+  final bool isExpanded;
+  final VoidCallback onToggle;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: onToggle,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    isExpanded ? Icons.expand_more : Icons.chevron_right,
+                    size: 18,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '折叠的流程消息（$itemCount）',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
-            if (!message.isLoading && message.recommendations.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              _RecommendationStrip(subjects: message.recommendations),
-            ],
+            ),
+          ),
+          if (isExpanded) ...[
+            const SizedBox(height: 8),
+            child,
           ],
-        ),
+        ],
       ),
     );
   }
 }
 
-class _TimelineItemView extends StatelessWidget {
-  const _TimelineItemView({required this.index, required this.item});
+class _ContentItemView extends StatelessWidget {
+  const _ContentItemView({required this.index, required this.item});
 
   final int index;
-  final ChatTimelineItem item;
+  final ChatContentItem item;
 
   @override
   Widget build(BuildContext context) {
     return switch (item.type) {
-      ChatTimelineItemType.assistant => _AssistantBubble(
+      ChatContentItemType.text => _AssistantBubble(
         content: item.content ?? '',
       ),
-      ChatTimelineItemType.toolCall => _ToolCallBubble(index: index, item: item),
+      ChatContentItemType.toolCall => _ToolCallBubble(index: index, item: item),
     };
   }
 }
@@ -260,8 +345,12 @@ class _MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      color: isUser ? const Color(0xFFD9F0F5) : Colors.white,
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: isUser ? colorScheme.primaryContainer : null,
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: isMarkdown
@@ -271,18 +360,25 @@ class _MessageBubble extends StatelessWidget {
                 styleSheet: MarkdownStyleSheet.fromTheme(
                   Theme.of(context),
                 ).copyWith(
-                  p: Theme.of(context).textTheme.bodyMedium,
+                  p: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: isUser ? colorScheme.onPrimaryContainer : null,
+                  ),
                   codeblockDecoration: BoxDecoration(
-                    color: const Color(0xFFF0F4F5),
+                    color: colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   blockquoteDecoration: BoxDecoration(
-                    color: const Color(0xFFE8F1F3),
+                    color: colorScheme.surfaceContainerHigh,
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
               )
-            : SelectableText(content),
+            : SelectableText(
+                content,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onPrimaryContainer,
+                ),
+              ),
       ),
     );
   }
@@ -295,7 +391,26 @@ class _AssistantBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _MessageBubble(isUser: false, content: content, isMarkdown: true);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: MarkdownBody(
+        data: content,
+        selectable: true,
+        styleSheet: MarkdownStyleSheet.fromTheme(
+          Theme.of(context),
+        ).copyWith(
+          p: Theme.of(context).textTheme.bodyMedium,
+          codeblockDecoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          blockquoteDecoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -303,7 +418,7 @@ class _ToolCallBubble extends StatelessWidget {
   const _ToolCallBubble({required this.index, required this.item});
 
   final int index;
-  final ChatTimelineItem item;
+  final ChatContentItem item;
 
   @override
   Widget build(BuildContext context) {
@@ -332,7 +447,7 @@ class _ToolDetailSheet extends StatelessWidget {
   const _ToolDetailSheet({required this.index, required this.item});
 
   final int index;
-  final ChatTimelineItem item;
+  final ChatContentItem item;
 
   @override
   Widget build(BuildContext context) {
@@ -402,65 +517,55 @@ class _ToolDetailSheet extends StatelessWidget {
 }
 
 class _RecommendationPanel extends StatelessWidget {
-  const _RecommendationPanel({required this.subject});
+  const _RecommendationPanel({
+    required this.subject,
+    required this.width,
+  });
 
   final Subject subject;
+  final double width;
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return SizedBox(
-      width: 232,
-      child: Card(
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => SubjectDetailPage(subjectId: subject.id),
-              ),
-            );
-          },
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                height: 128,
-                width: double.infinity,
+      width: width,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => SubjectDetailPage(subjectId: subject.id),
+            ),
+          );
+        },
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: AspectRatio(
+                aspectRatio: 3 / 4,
                 child: _RecommendationPoster(subject: subject),
               ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        subject.displayName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '评分 ${subject.score.toStringAsFixed(1)} · Rank ${subject.rank == 0 ? '-' : subject.rank}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: Text(
-                          subject.summary.isEmpty ? '暂无简介。' : subject.summary,
-                          maxLines: 4,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              subject.displayName,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '评分 ${subject.score.toStringAsFixed(1)} · Rank ${subject.rank == 0 ? '-' : subject.rank}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -470,21 +575,25 @@ class _RecommendationPanel extends StatelessWidget {
 class _RecommendationStrip extends StatelessWidget {
   const _RecommendationStrip({required this.subjects});
 
+  static const double _itemWidth = 112;
+  static const double _itemGap = 12;
+
   final List<Subject> subjects;
 
   @override
   Widget build(BuildContext context) {
+    const itemHeight = _itemWidth / 0.75 + 48;
     return SizedBox(
       width: double.infinity,
-      child: SizedBox(
-        height: 252,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          itemBuilder: (context, index) =>
-              _RecommendationPanel(subject: subjects[index]),
-          separatorBuilder: (context, index) => const SizedBox(width: 12),
-          itemCount: subjects.length,
+      height: itemHeight,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemBuilder: (context, index) => _RecommendationPanel(
+          subject: subjects[index],
+          width: _itemWidth,
         ),
+        separatorBuilder: (context, index) => const SizedBox(width: _itemGap),
+        itemCount: subjects.length,
       ),
     );
   }
@@ -498,27 +607,9 @@ class _RecommendationPoster extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (subject.image.isEmpty) {
-      return Container(
-        color: const Color(0xFFD8E8E1),
-        alignment: Alignment.center,
-        child: Icon(
-          Icons.movie_outlined,
-          color: Theme.of(context).colorScheme.primary,
-        ),
-      );
+      return const AppNetworkImage(imageUrl: '');
     }
-    return Image.network(
-      subject.image,
-      fit: BoxFit.cover,
-      errorBuilder: (context, error, stackTrace) => Container(
-        color: const Color(0xFFD8E8E1),
-        alignment: Alignment.center,
-        child: Icon(
-          Icons.movie_outlined,
-          color: Theme.of(context).colorScheme.primary,
-        ),
-      ),
-    );
+    return AppNetworkImage(imageUrl: subject.image, fit: BoxFit.cover);
   }
 }
 
@@ -529,11 +620,12 @@ class _StructuredPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF3F6F7),
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(14),
       ),
       child: SelectableText(

@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:developer' as developer;
 
+import '../../backend/api/bangumi_repository.dart';
 import '../../backend/models/chat_message.dart';
+import '../../backend/models/subject.dart';
 import '../../backend/services/agent.dart';
 
 class ChatViewState {
@@ -30,13 +32,14 @@ class ChatViewState {
 }
 
 class ChatStore {
-  ChatStore(this._agent) {
+  ChatStore(this._agent, this._bangumiRepository) {
     _controller = StreamController<ChatViewState>.broadcast(
       onListen: () => _controller.add(_state),
     );
   }
 
   final Agent _agent;
+  final BangumiRepository _bangumiRepository;
   late final StreamController<ChatViewState> _controller;
   ChatViewState _state = const ChatViewState();
   bool _stopRequested = false;
@@ -57,12 +60,16 @@ class ChatStore {
       ChatMessage(
         id: DateTime.now().microsecondsSinceEpoch.toString(),
         role: ChatRole.user,
-        content: trimmed,
+        contents: [
+          ChatContentItem.text(
+            id: 'user-${DateTime.now().microsecondsSinceEpoch}',
+            content: trimmed,
+          ),
+        ],
       ),
       ChatMessage(
         id: loadingId,
         role: ChatRole.assistant,
-        content: '',
         isLoading: true,
       ),
     ];
@@ -80,6 +87,7 @@ class ChatStore {
     try {
       final history = nextMessages
           .where((item) => !item.isLoading)
+          .where((item) => item.role != ChatRole.assistant || item.content.trim().isNotEmpty)
           .toList(growable: false);
       final priorHistory = history.isEmpty
           ? const <ChatMessage>[]
@@ -90,16 +98,21 @@ class ChatStore {
         ChatContext(history: priorHistory),
         shouldStop: () => _stopRequested,
       )) {
-        final existing = _messageById(loadingId);
         _replaceMessage(
           loadingId,
           ChatMessage(
             id: loadingId,
             role: ChatRole.assistant,
-            content: existing.content,
-            timeline: update.timeline,
+            contents: update.contents,
             recommendations: update.recommendations,
+            recommendationSubjectIds: update.recommendationSubjectIds,
             isLoading: !update.isFinal,
+          ),
+        );
+        unawaited(
+          _resolveRecommendationsForMessage(
+            loadingId,
+            subjectIds: update.recommendationSubjectIds,
           ),
         );
         _emit(_state.copyWith(messages: List<ChatMessage>.unmodifiable(_messages)));
@@ -116,9 +129,14 @@ class ChatStore {
         ChatMessage(
           id: loadingId,
           role: ChatRole.assistant,
-          content: _messageById(loadingId).content.isEmpty
-              ? '请求失败：$error'
-              : _messageById(loadingId).content,
+          contents: _messageById(loadingId).contents.isEmpty
+              ? [
+                  ChatContentItem.text(
+                    id: '$loadingId-error',
+                    content: '请求失败：$error',
+                  ),
+                ]
+              : _messageById(loadingId).contents,
           isError: true,
         ),
       );
@@ -165,7 +183,6 @@ class ChatStore {
       return const ChatMessage(
         id: 'missing',
         role: ChatRole.assistant,
-        content: '',
       );
     }
     return _messages[index];
@@ -180,5 +197,76 @@ class ChatStore {
 
   void dispose() {
     _controller.close();
+  }
+
+  Future<void> _resolveRecommendationsForMessage(
+    String messageId, {
+    required List<int> subjectIds,
+  }) async {
+    if (subjectIds.isEmpty) {
+      return;
+    }
+
+    final initial = _messageById(messageId);
+    if (!_sameRecommendationIds(initial.recommendationSubjectIds, subjectIds)) {
+      return;
+    }
+
+    final subjectsById = <int, Subject>{
+      for (final subject in initial.recommendations) subject.id: subject,
+    };
+    final missingIds = subjectIds
+        .where((id) => !subjectsById.containsKey(id))
+        .toList(growable: false);
+    if (missingIds.isEmpty) {
+      return;
+    }
+
+    for (final id in missingIds) {
+      try {
+        final subject = await _bangumiRepository.getSubjectDetail(id);
+        final latest = _messageById(messageId);
+        if (!_sameRecommendationIds(latest.recommendationSubjectIds, subjectIds)) {
+          return;
+        }
+        subjectsById[id] = subject;
+        _replaceMessage(
+          messageId,
+          latest.copyWith(
+            recommendations: _orderedRecommendations(subjectIds, subjectsById),
+          ),
+        );
+        _emit(_state.copyWith(messages: List<ChatMessage>.unmodifiable(_messages)));
+      } catch (error, stackTrace) {
+        developer.log(
+          'Recommendation subject hydration failed for $id',
+          name: 'anibird.chat',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+    }
+  }
+
+  bool _sameRecommendationIds(List<int> left, List<int> right) {
+    if (left.length != right.length) {
+      return false;
+    }
+    for (var index = 0; index < left.length; index += 1) {
+      if (left[index] != right[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  List<Subject> _orderedRecommendations(
+    List<int> subjectIds,
+    Map<int, Subject> subjectsById,
+  ) {
+    return subjectIds
+        .map((id) => subjectsById[id])
+        .whereType<Subject>()
+        .toList(growable: false);
   }
 }
