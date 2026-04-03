@@ -12,23 +12,22 @@ class TimelinePage extends StatefulWidget {
 }
 
 class _TimelinePageState extends State<TimelinePage> {
-  late final TimelineStore _store;
-  bool _hasBoundStore = false;
-
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (!_hasBoundStore) {
-      _store = AppScope.of(context).timelineStore;
-      _hasBoundStore = true;
-      _store.load();
-    }
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      context.readAppDependencies.timelineStore.load();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final store = context.timelineStore;
     return ValueListenableBuilder<TimelineState>(
-      valueListenable: _store,
+      valueListenable: store,
       builder: (context, state, _) {
         final colorScheme = Theme.of(context).colorScheme;
         return ListView(
@@ -43,7 +42,7 @@ class _TimelinePageState extends State<TimelinePage> {
                   ),
                 ),
                 IconButton(
-                  onPressed: state.isLoading || state.isRefreshing ? null : _store.refresh,
+                  onPressed: state.isLoading || state.isRefreshing ? null : store.refresh,
                   icon: state.isRefreshing
                       ? const SizedBox(
                           width: 18,
@@ -68,13 +67,13 @@ class _TimelinePageState extends State<TimelinePage> {
                   label: '关注',
                   mode: TimelineMode.friends,
                   selectedMode: state.mode,
-                  onSelected: () => _store.load(TimelineMode.friends),
+                  onSelected: () => store.load(TimelineMode.friends),
                 ),
                 TimelineModeChip(
                   label: '全站',
                   mode: TimelineMode.all,
                   selectedMode: state.mode,
-                  onSelected: () => _store.load(TimelineMode.all),
+                  onSelected: () => store.load(TimelineMode.all),
                 ),
               ],
             ),
@@ -129,7 +128,7 @@ class _TimelinePageState extends State<TimelinePage> {
                 ),
               if (state.hasMore)
                 FilledButton.tonal(
-                  onPressed: state.isLoadingMore ? null : _store.loadMore,
+                  onPressed: state.isLoadingMore ? null : store.loadMore,
                   child: Text(state.isLoadingMore ? '加载中...' : '加载更多'),
                 ),
             ],

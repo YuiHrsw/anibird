@@ -15,25 +15,20 @@ class DiscoveryPage extends StatefulWidget {
 
 class _DiscoveryPageState extends State<DiscoveryPage> {
   late final TextEditingController _searchController;
-  late final DiscoveryStore _store;
-  bool _hasBoundStore = false;
 
   @override
   void initState() {
     super.initState();
     _searchController = TextEditingController();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (!_hasBoundStore) {
-      _store = AppScope.of(context).discoveryStore;
-      _hasBoundStore = true;
-    }
-    if (!_store.value.hasLoadedFeatured && !_store.value.isLoading) {
-      _store.loadFeatured();
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      final store = context.readAppDependencies.discoveryStore;
+      if (!store.value.hasLoadedFeatured && !store.value.isLoading) {
+        store.loadFeatured();
+      }
+    });
   }
 
   @override
@@ -44,8 +39,9 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
 
   @override
   Widget build(BuildContext context) {
+    final store = context.discoveryStore;
     return ValueListenableBuilder<DiscoveryState>(
-      valueListenable: _store,
+      valueListenable: store,
       builder: (context, state, _) {
         final colorScheme = Theme.of(context).colorScheme;
         final List<Subject> displayItems = state.keyword.isEmpty
@@ -68,7 +64,7 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
                 ),
                 filled: false,
               ),
-              onSubmitted: _store.search,
+              onSubmitted: store.search,
             ),
             const SizedBox(height: 20),
             if (state.isLoading)

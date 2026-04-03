@@ -16,7 +16,7 @@ class CollectionFilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final store = AppScope.of(context).myCollectionsStore;
+    final store = context.myCollectionsStore;
     return ValueListenableBuilder<MyCollectionsState>(
       valueListenable: store,
       builder: (context, state, _) {

@@ -23,6 +23,8 @@
 - `timeline` 是聊天渲染主通道，不要重新引入旧的 ReAct 侧通道设计。
 - `present_recommendations` 是可选工具，不要把它重新做成强制步骤。
 - 当前状态管理使用 `ValueNotifier`、`Stream` 和 `AppScope`，不要仅为了“更标准”而迁移到 Provider。
+- 共享依赖优先直接通过 `BuildContext` 上的 `AppScope` extension 读取，不要继续写 `didChangeDependencies + AppScope.of(context) + 本地字段缓存` 的样板代码。
+- 设置页这类分类页面，父页面只负责布局、导航和分类切换；具体分类内容应直接对接对应 store / 数据类，不要在父页面维护子页面字段级状态。
 - 当前仓库不保留 `test/` 自动化测试代码。
 
 ## 工作边界
@@ -99,14 +101,14 @@
 
 ## 页面级 Store 初始化迁移说明
 
-- 当前少量页面仍保留一种过渡写法：在 `didChangeDependencies()` 中从 `AppScope` 读取 store 或 factory，并缓存到页面字段，再触发首次加载。
-- 这类写法当前可以继续容忍于“页面独立实例型 store”场景，因为数量不多，且不阻塞当前原型推进。
-- 但它属于过渡方案，不应继续扩散成默认模式；问题在于：
-  - 页面层会重复出现样板化的依赖读取与首次加载逻辑。
-  - 页面直接持有 `AppScope` 具体装配细节，耦合偏高。
-  - 后续若要做响应式重组、路由复用或独立注入，迁移成本会上升。
+- 当前共享 store 的读取方式已经收敛到 `BuildContext` extension，不再推荐：
+  - `didChangeDependencies()`
+  - `AppScope.of(context)`
+  - 本地 `_hasBoundStore` / `_hasStartedLoading` 标志
+- 后续默认做法：
+  - 共享 store：直接通过 `context.xxxStore` 读取
+  - 只读一次但不订阅的依赖：通过 `context.readAppDependencies.xxx` 读取
+  - 页面独立实例型 store：允许保留页面字段，但优先在 `initState()` 中通过 factory 创建，并明确负责其生命周期和 `dispose()`
 - 后续迁移方向：
-  - 全局共享型 store 允许直接从 `AppScope` 读取，不额外复制到页面字段。
-  - 页面独立实例型 store 优先改为在页面外完成装配，或通过构造参数显式注入。
-  - 不要继续在新页面里机械复制“`didChangeDependencies + _hasStartedLoading + AppScope.of(context)`”模板。
-- 当前这部分只记录为结构债，不要求为了清理它而立即做大规模重构；后续在相关页面继续演进时顺手收敛即可。
+  - 页面独立实例型 store 后续仍可继续评估外部装配或构造注入，但当前不是优先级最高的重构目标。
+  - 不要继续在新页面里机械复制生命周期样板代码来读取共享依赖。

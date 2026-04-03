@@ -43,3 +43,27 @@ class AppScope extends InheritedWidget {
   bool updateShouldNotify(AppScope oldWidget) =>
       oldWidget.dependencies != dependencies;
 }
+
+extension AppScopeBuildContext on BuildContext {
+  AppDependencies get appDependencies {
+    final scope = dependOnInheritedWidgetOfExactType<AppScope>();
+    assert(scope != null, 'AppScope not found in widget tree.');
+    return scope!.dependencies;
+  }
+
+  AppDependencies get readAppDependencies {
+    final scope =
+        getElementForInheritedWidgetOfExactType<AppScope>()?.widget as AppScope?;
+    assert(scope != null, 'AppScope not found in widget tree.');
+    return scope!.dependencies;
+  }
+
+  BangumiRepository get bangumiRepository => appDependencies.bangumiRepository;
+  DiscoveryStore get discoveryStore => appDependencies.discoveryStore;
+  ChatStore get chatStore => appDependencies.chatStore;
+  MyCollectionsStore get myCollectionsStore => appDependencies.myCollectionsStore;
+  TimelineStore get timelineStore => appDependencies.timelineStore;
+  SettingsStore get settingsStore => appDependencies.settingsStore;
+  SubjectDetailStoreFactory get subjectDetailStoreFactory =>
+      appDependencies.subjectDetailStoreFactory;
+}

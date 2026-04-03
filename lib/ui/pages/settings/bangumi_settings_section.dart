@@ -1,26 +1,15 @@
 import 'package:flutter/material.dart';
 
-import '../../../backend/models/app_config.dart';
 import '../../state/settings_store.dart';
 import 'settings_widgets.dart';
 
 class BangumiSettingsSection extends StatefulWidget {
   const BangumiSettingsSection({
     super.key,
-    required this.state,
-    required this.config,
-    required this.onChanged,
-    required this.onRefresh,
-    required this.onLogin,
-    required this.onLogout,
+    required this.store,
   });
 
-  final SettingsState state;
-  final AppConfig config;
-  final ValueChanged<AppConfig> onChanged;
-  final Future<void> Function()? onRefresh;
-  final Future<void> Function()? onLogin;
-  final Future<void> Function()? onLogout;
+  final SettingsStore store;
 
   @override
   State<BangumiSettingsSection> createState() => _BangumiSettingsSectionState();
@@ -37,63 +26,31 @@ class _BangumiSettingsSectionState extends State<BangumiSettingsSection> {
   @override
   void initState() {
     super.initState();
+    final config = widget.store.value.config;
     _userAgentController = TextEditingController(
-      text: widget.config.bangumiUserAgent,
+      text: config.bangumiUserAgent,
     );
     _privateBaseUrlController = TextEditingController(
-      text: widget.config.bangumiPrivateApiBaseUrl,
+      text: config.bangumiPrivateApiBaseUrl,
     );
     _oauthClientIdController = TextEditingController(
-      text: widget.config.bangumiOauthClientId,
+      text: config.bangumiOauthClientId,
     );
     _oauthClientSecretController = TextEditingController(
-      text: widget.config.bangumiOauthClientSecret,
+      text: config.bangumiOauthClientSecret,
     );
     _oauthRedirectUriController = TextEditingController(
-      text: widget.config.bangumiOauthRedirectUri,
+      text: config.bangumiOauthRedirectUri,
     );
     _accessTokenController = TextEditingController(
-      text: widget.config.bangumiAccessToken,
+      text: config.bangumiAccessToken,
     );
-  }
-
-  @override
-  void didUpdateWidget(covariant BangumiSettingsSection oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _syncController(
-      _userAgentController,
-      oldWidget.config.bangumiUserAgent,
-      widget.config.bangumiUserAgent,
-    );
-    _syncController(
-      _privateBaseUrlController,
-      oldWidget.config.bangumiPrivateApiBaseUrl,
-      widget.config.bangumiPrivateApiBaseUrl,
-    );
-    _syncController(
-      _oauthClientIdController,
-      oldWidget.config.bangumiOauthClientId,
-      widget.config.bangumiOauthClientId,
-    );
-    _syncController(
-      _oauthClientSecretController,
-      oldWidget.config.bangumiOauthClientSecret,
-      widget.config.bangumiOauthClientSecret,
-    );
-    _syncController(
-      _oauthRedirectUriController,
-      oldWidget.config.bangumiOauthRedirectUri,
-      widget.config.bangumiOauthRedirectUri,
-    );
-    _syncController(
-      _accessTokenController,
-      oldWidget.config.bangumiAccessToken,
-      widget.config.bangumiAccessToken,
-    );
+    widget.store.addListener(_handleStoreChanged);
   }
 
   @override
   void dispose() {
+    widget.store.removeListener(_handleStoreChanged);
     _userAgentController.dispose();
     _privateBaseUrlController.dispose();
     _oauthClientIdController.dispose();
@@ -103,108 +60,156 @@ class _BangumiSettingsSectionState extends State<BangumiSettingsSection> {
     super.dispose();
   }
 
-  void _syncController(
-    TextEditingController controller,
-    String oldValue,
-    String newValue,
-  ) {
-    if (oldValue != newValue && controller.text != newValue) {
-      controller.text = newValue;
-    }
+  void _handleStoreChanged() {
+    final config = widget.store.value.config;
+    _syncController(_userAgentController, config.bangumiUserAgent);
+    _syncController(_privateBaseUrlController, config.bangumiPrivateApiBaseUrl);
+    _syncController(_oauthClientIdController, config.bangumiOauthClientId);
+    _syncController(
+      _oauthClientSecretController,
+      config.bangumiOauthClientSecret,
+    );
+    _syncController(_oauthRedirectUriController, config.bangumiOauthRedirectUri);
+    _syncController(_accessTokenController, config.bangumiAccessToken);
   }
 
-  void _emitChanged() {
-    widget.onChanged(
-      widget.config.copyWith(
-        bangumiUserAgent: _userAgentController.text,
-        bangumiPrivateApiBaseUrl: _privateBaseUrlController.text,
-        bangumiOauthClientId: _oauthClientIdController.text,
-        bangumiOauthClientSecret: _oauthClientSecretController.text,
-        bangumiOauthRedirectUri: _oauthRedirectUriController.text,
-        bangumiAccessToken: _accessTokenController.text,
-      ),
+  void _syncController(TextEditingController controller, String nextValue) {
+    if (controller.text == nextValue) {
+      return;
+    }
+    controller.value = controller.value.copyWith(
+      text: nextValue,
+      selection: TextSelection.collapsed(offset: nextValue.length),
+      composing: TextRange.empty,
+    );
+  }
+
+  Future<void> _save() async {
+    final current = widget.store.value.config;
+    final next = current.copyWith(
+      bangumiUserAgent: _userAgentController.text,
+      bangumiPrivateApiBaseUrl: _privateBaseUrlController.text,
+      bangumiOauthClientId: _oauthClientIdController.text,
+      bangumiOauthClientSecret: _oauthClientSecretController.text,
+      bangumiOauthRedirectUri: _oauthRedirectUriController.text,
+      bangumiAccessToken: _accessTokenController.text,
+    );
+    await widget.store.save(next);
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('配置已保存')));
+  }
+
+  Future<void> _startOauthLogin() async {
+    await _save();
+    await widget.store.startBangumiOAuthLogin();
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已打开浏览器，请完成 Bangumi 授权。')),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        TextFormField(
-          key: const ValueKey('settings-user-agent'),
-          controller: _userAgentController,
-          onChanged: (_) => _emitChanged(),
-          decoration: const InputDecoration(
-            labelText: 'Bangumi User-Agent',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextFormField(
-          key: const ValueKey('settings-bangumi-private-base-url'),
-          controller: _privateBaseUrlController,
-          onChanged: (_) => _emitChanged(),
-          decoration: const InputDecoration(
-            labelText: 'Bangumi Private API Base URL',
-            hintText: 'https://next.bgm.tv/p1',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextFormField(
-          key: const ValueKey('settings-bangumi-oauth-client-id'),
-          controller: _oauthClientIdController,
-          onChanged: (_) => _emitChanged(),
-          decoration: const InputDecoration(
-            labelText: 'Bangumi OAuth Client ID',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextFormField(
-          key: const ValueKey('settings-bangumi-oauth-client-secret'),
-          controller: _oauthClientSecretController,
-          onChanged: (_) => _emitChanged(),
-          decoration: const InputDecoration(
-            labelText: 'Bangumi OAuth Client Secret',
-            border: OutlineInputBorder(),
-          ),
-          obscureText: true,
-        ),
-        const SizedBox(height: 12),
-        TextFormField(
-          key: const ValueKey('settings-bangumi-oauth-redirect-uri'),
-          controller: _oauthRedirectUriController,
-          onChanged: (_) => _emitChanged(),
-          decoration: const InputDecoration(
-            labelText: 'Bangumi OAuth Redirect URI',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextFormField(
-          key: const ValueKey('settings-bangumi-access-token'),
-          controller: _accessTokenController,
-          onChanged: (_) => _emitChanged(),
-          decoration: const InputDecoration(
-            labelText: 'Bangumi Access Token',
-            border: OutlineInputBorder(),
-          ),
-          obscureText: true,
-        ),
-        const SizedBox(height: 20),
-        BangumiProfileCard(
-          profile: widget.state.bangumiProfile,
-          error: widget.state.bangumiProfileError,
-          isLoading: widget.state.isLoadingBangumiProfile,
-          authError: widget.state.bangumiAuthError,
-          isAuthorizing: widget.state.isBangumiAuthorizing,
-          onRefresh: widget.onRefresh,
-          onLogin: widget.onLogin,
-          onLogout: widget.onLogout,
-        ),
-      ],
+    return ValueListenableBuilder<SettingsState>(
+      valueListenable: widget.store,
+      builder: (context, state, _) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.tonal(
+                onPressed: state.isSaving
+                    ? null
+                    : () async {
+                        await _save();
+                      },
+                child: Text(state.isSaving ? '保存中...' : '保存'),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              key: const ValueKey('settings-user-agent'),
+              controller: _userAgentController,
+              decoration: const InputDecoration(
+                labelText: 'Bangumi User-Agent',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              key: const ValueKey('settings-bangumi-private-base-url'),
+              controller: _privateBaseUrlController,
+              decoration: const InputDecoration(
+                labelText: 'Bangumi Private API Base URL',
+                hintText: 'https://next.bgm.tv/p1',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              key: const ValueKey('settings-bangumi-oauth-client-id'),
+              controller: _oauthClientIdController,
+              decoration: const InputDecoration(
+                labelText: 'Bangumi OAuth Client ID',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              key: const ValueKey('settings-bangumi-oauth-client-secret'),
+              controller: _oauthClientSecretController,
+              decoration: const InputDecoration(
+                labelText: 'Bangumi OAuth Client Secret',
+                border: OutlineInputBorder(),
+              ),
+              obscureText: true,
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              key: const ValueKey('settings-bangumi-oauth-redirect-uri'),
+              controller: _oauthRedirectUriController,
+              decoration: const InputDecoration(
+                labelText: 'Bangumi OAuth Redirect URI',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              key: const ValueKey('settings-bangumi-access-token'),
+              controller: _accessTokenController,
+              decoration: const InputDecoration(
+                labelText: 'Bangumi Access Token',
+                border: OutlineInputBorder(),
+              ),
+              obscureText: true,
+            ),
+            const SizedBox(height: 20),
+            BangumiProfileCard(
+              profile: state.bangumiProfile,
+              error: state.bangumiProfileError,
+              isLoading: state.isLoadingBangumiProfile,
+              authError: state.bangumiAuthError,
+              isAuthorizing: state.isBangumiAuthorizing,
+              onRefresh: state.isSaving || state.isLoadingBangumiProfile
+                  ? null
+                  : widget.store.refreshBangumiProfile,
+              onLogin: state.isSaving || state.isBangumiAuthorizing
+                  ? null
+                  : _startOauthLogin,
+              onLogout: state.isSaving || state.isBangumiAuthorizing
+                  ? null
+                  : widget.store.logoutBangumi,
+            ),
+          ],
+        );
+      },
     );
   }
 }

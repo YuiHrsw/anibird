@@ -22,16 +22,11 @@ class SubjectDetailPage extends StatefulWidget {
 
 class _SubjectDetailPageState extends State<SubjectDetailPage> {
   late final SubjectDetailStore _store;
-  bool _hasStartedLoading = false;
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_hasStartedLoading) {
-      return;
-    }
-    _store = AppScope.of(context).subjectDetailStoreFactory();
-    _hasStartedLoading = true;
+  void initState() {
+    super.initState();
+    _store = context.readAppDependencies.subjectDetailStoreFactory();
     _store.load(widget.subjectId);
   }
 

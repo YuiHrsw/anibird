@@ -17,8 +17,6 @@ class ChatPage extends StatefulWidget {
 
 class _ChatPageState extends State<ChatPage> {
   late final TextEditingController _inputController;
-  late final ChatStore _chatStore;
-  bool _hasBoundStore = false;
   final ScrollController _scrollController = ScrollController();
   bool _shouldAutoScroll = true;
 
@@ -30,15 +28,6 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (!_hasBoundStore) {
-      _chatStore = AppScope.of(context).chatStore;
-      _hasBoundStore = true;
-    }
-  }
-
-  @override
   void dispose() {
     _inputController.dispose();
     _scrollController.dispose();
@@ -47,11 +36,12 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    final chatStore = context.chatStore;
     return StreamBuilder<ChatViewState>(
-      stream: _chatStore.stream,
-      initialData: _chatStore.currentState,
+      stream: chatStore.stream,
+      initialData: chatStore.currentState,
       builder: (context, snapshot) {
-        final chatState = snapshot.data ?? _chatStore.currentState;
+        final chatState = snapshot.data ?? chatStore.currentState;
         final messages = chatState.messages;
         final isGenerating = chatState.isGenerating;
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -86,7 +76,9 @@ class _ChatPageState extends State<ChatPage> {
                       padding: const EdgeInsets.all(16),
                       sliver: SliverList.separated(
                         itemBuilder: (context, index) => _ChatMessageItem(
-                          key: ValueKey(messages[index].id),
+                          key: ValueKey(
+                            '${messages[index].id}:${messages[index].contents.length}',
+                          ),
                           message: messages[index],
                         ),
                         separatorBuilder: (context, index) =>
@@ -117,7 +109,7 @@ class _ChatPageState extends State<ChatPage> {
                     const SizedBox(width: 12),
                     FilledButton(
                       onPressed: isGenerating
-                          ? _chatStore.stopGeneration
+                          ? chatStore.stopGeneration
                           : () => _send(_inputController.text),
                       child: Text(isGenerating ? '停止' : '发送'),
                     ),
@@ -137,7 +129,7 @@ class _ChatPageState extends State<ChatPage> {
       return;
     }
     _inputController.clear();
-    await _chatStore.sendMessage(text);
+    await context.readAppDependencies.chatStore.sendMessage(text);
   }
 
   void _handleScroll() {
@@ -172,25 +164,6 @@ class _ChatMessageItem extends StatefulWidget {
 
 class _ChatMessageItemState extends State<_ChatMessageItem> {
   bool _showOlderTimeline = false;
-  int _lastTimelineCount = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _lastTimelineCount = widget.message.contents.length;
-  }
-
-  @override
-  void didUpdateWidget(covariant _ChatMessageItem oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final nextCount = widget.message.contents.length;
-    if (nextCount != _lastTimelineCount) {
-      _lastTimelineCount = nextCount;
-      if (nextCount > 1) {
-        _showOlderTimeline = false;
-      }
-    }
-  }
 
   @override
   Widget build(BuildContext context) {

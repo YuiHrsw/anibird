@@ -68,14 +68,10 @@ class SettingsSectionPage extends StatelessWidget {
     super.key,
     required this.title,
     required this.children,
-    this.actionLabel,
-    this.onAction,
   });
 
   final String title;
   final List<Widget> children;
-  final String? actionLabel;
-  final Future<void> Function()? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -91,20 +87,7 @@ class SettingsSectionPage extends StatelessWidget {
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(title),
-        actions: [
-          if (actionLabel != null)
-            TextButton(
-              onPressed: onAction == null
-                  ? null
-                  : () async {
-                      await onAction!.call();
-                    },
-              child: Text(actionLabel!),
-            ),
-        ],
-      ),
+      appBar: AppBar(title: Text(title)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: children,
@@ -119,16 +102,12 @@ class SettingsSectionDefinition {
     required this.title,
     required this.subtitle,
     required this.children,
-    this.actionLabel,
-    this.onAction,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
   final List<Widget> children;
-  final String? actionLabel;
-  final Future<void> Function()? onAction;
 }
 
 class BangumiProfileCard extends StatelessWidget {

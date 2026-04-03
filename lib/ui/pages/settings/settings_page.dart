@@ -2,12 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../../../app/app_layout_scope.dart';
 import '../../../app/app_scope.dart';
-import '../../../backend/models/app_config.dart';
+import '../../state/settings_store.dart';
 import 'bangumi_settings_section.dart';
 import 'model_settings_section.dart';
 import 'settings_widgets.dart';
 import 'storage_settings_section.dart';
-import '../../state/settings_store.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -17,44 +16,28 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  late final SettingsStore _store;
   _SettingsSection _selectedSection = _SettingsSection.model;
-  bool _hasBoundStore = false;
-  bool _hasSyncedInitialConfig = false;
-  AppConfig? _draftConfig;
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (!_hasBoundStore) {
-      _store = AppScope.of(context).settingsStore;
-      _hasBoundStore = true;
-    }
-    if (!_store.value.isLoaded) {
-      _store.load();
-    }
-    if (_store.value.isLoaded && !_hasSyncedInitialConfig) {
-      _draftConfig = _store.value.config;
-      _hasSyncedInitialConfig = true;
-    }
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      final store = context.readAppDependencies.settingsStore;
+      if (!store.value.isLoaded) {
+        store.load();
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final store = context.settingsStore;
     return ValueListenableBuilder<SettingsState>(
-      valueListenable: _store,
+      valueListenable: store,
       builder: (context, state, _) {
-        if (state.isLoaded && !_hasSyncedInitialConfig) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted || _hasSyncedInitialConfig) {
-              return;
-            }
-            setState(() {
-              _draftConfig = state.config;
-              _hasSyncedInitialConfig = true;
-            });
-          });
-        }
         final isWide =
             AppLayoutScope.maybeOf(context)?.useRailNavigation ?? false;
         if (!isWide) {
@@ -100,14 +83,14 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildWideSettings(BuildContext context, SettingsState state) {
     final colorScheme = Theme.of(context).colorScheme;
-    final selected = _buildSectionDefinition(context, state, _selectedSection);
+    final selected = _buildSectionDefinition(state, _selectedSection);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 240,
-            child: ListView(
-              children: [
+      children: [
+        SizedBox(
+          width: 240,
+          child: ListView(
+            children: [
               if (state.error != null) ...[
                 Text(
                   state.error!,
@@ -122,11 +105,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: 16),
-              ..._buildSectionEntries(
-                context,
-                state,
-                navigate: false,
-              ),
+              ..._buildSectionEntries(context, state, navigate: false),
             ],
           ),
         ),
@@ -138,24 +117,9 @@ class _SettingsPageState extends State<SettingsPage> {
         Expanded(
           child: ListView(
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      selected.title,
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                  ),
-                  if (selected.actionLabel != null)
-                    TextButton(
-                      onPressed: selected.onAction == null
-                          ? null
-                          : () async {
-                              await selected.onAction!.call();
-                            },
-                      child: Text(selected.actionLabel!),
-                    ),
-                ],
+              Text(
+                selected.title,
+                style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 12),
               ...selected.children,
@@ -172,7 +136,7 @@ class _SettingsPageState extends State<SettingsPage> {
     required bool navigate,
   }) {
     return _SettingsSection.values.map((section) {
-      final definition = _buildSectionDefinition(context, state, section);
+      final definition = _buildSectionDefinition(state, section);
       return SettingsEntryTile(
         icon: definition.icon,
         title: definition.title,
@@ -184,11 +148,8 @@ class _SettingsPageState extends State<SettingsPage> {
               _selectedSection = section;
             });
             _openSectionPage(
-              title: definition.title,
               child: SettingsSectionPage(
                 title: definition.title,
-                actionLabel: definition.actionLabel,
-                onAction: definition.onAction,
                 children: definition.children,
               ),
             );
@@ -203,54 +164,31 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   SettingsSectionDefinition _buildSectionDefinition(
-    BuildContext context,
     SettingsState state,
     _SettingsSection section,
   ) {
     switch (section) {
       case _SettingsSection.model:
-        final draft = _effectiveConfig(state);
         return SettingsSectionDefinition(
           icon: Icons.smart_toy_outlined,
           title: '模型配置',
-          subtitle: draft.llmModel.trim().isEmpty
+          subtitle: state.config.llmModel.trim().isEmpty
               ? 'Base URL、API Key、Model'
-              : draft.llmModel.trim(),
-          actionLabel: state.isSaving ? '保存中...' : '保存',
-          onAction: state.isSaving ? null : _save,
+              : state.config.llmModel.trim(),
           children: [
-            ModelSettingsSection(
-              config: draft,
-              onChanged: _updateDraftConfig,
-            ),
+            ModelSettingsSection(store: context.settingsStore),
           ],
         );
       case _SettingsSection.bangumi:
-        final draft = _effectiveConfig(state);
         return SettingsSectionDefinition(
           icon: Icons.api_outlined,
           title: 'Bangumi 设置',
-          subtitle: draft.bangumiPrivateApiBaseUrl.trim().isEmpty
+          subtitle: state.config.bangumiPrivateApiBaseUrl.trim().isEmpty
               ? 'API、OAuth、账号状态'
               : (state.bangumiProfile?.displayName ??
-                    draft.bangumiPrivateApiBaseUrl.trim()),
-          actionLabel: state.isSaving ? '保存中...' : '保存',
-          onAction: state.isSaving ? null : _save,
+                    state.config.bangumiPrivateApiBaseUrl.trim()),
           children: [
-            BangumiSettingsSection(
-              state: state,
-              config: draft,
-              onChanged: _updateDraftConfig,
-              onRefresh: state.isSaving || state.isLoadingBangumiProfile
-                  ? null
-                  : _store.refreshBangumiProfile,
-              onLogin: state.isSaving || state.isBangumiAuthorizing
-                  ? null
-                  : _startBangumiOAuthLogin,
-              onLogout: state.isSaving || state.isBangumiAuthorizing
-                  ? null
-                  : _store.logoutBangumi,
-            ),
+            BangumiSettingsSection(store: context.settingsStore),
           ],
         );
       case _SettingsSection.storage:
@@ -269,42 +207,9 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  Future<void> _save() async {
-    final config = _effectiveConfig(_store.value);
-    await _store.save(config);
-    if (!mounted) {
-      return;
-    }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('配置已保存')));
-    _hasSyncedInitialConfig = true;
-  }
-
-  AppConfig _effectiveConfig(SettingsState state) {
-    return _draftConfig ?? state.config;
-  }
-
-  void _updateDraftConfig(AppConfig nextConfig) {
-    setState(() {
-      _draftConfig = nextConfig;
-    });
-  }
-
-  Future<void> _startBangumiOAuthLogin() async {
-    await _save();
-    await _store.startBangumiOAuthLogin();
-    if (!mounted) {
-      return;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已打开浏览器，请完成 Bangumi 授权。')),
-    );
-  }
-
   Future<void> _clearImageCache() async {
     try {
-      await _store.clearImageCache();
+      await context.readAppDependencies.settingsStore.clearImageCache();
     } catch (_) {
       return;
     }
@@ -318,7 +223,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _clearAllCaches() async {
     try {
-      await _store.clearAllCaches();
+      await context.readAppDependencies.settingsStore.clearAllCaches();
     } catch (_) {
       return;
     }
@@ -331,7 +236,6 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _openSectionPage({
-    required String title,
     required Widget child,
   }) async {
     await Navigator.of(context).push(

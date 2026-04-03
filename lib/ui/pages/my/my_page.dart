@@ -14,23 +14,22 @@ class MyPage extends StatefulWidget {
 }
 
 class _MyPageState extends State<MyPage> {
-  late final MyCollectionsStore _store;
-  bool _hasBoundStore = false;
-
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (!_hasBoundStore) {
-      _store = AppScope.of(context).myCollectionsStore;
-      _hasBoundStore = true;
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
       _refreshOnOpen();
-    }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final store = context.myCollectionsStore;
     return ValueListenableBuilder<MyCollectionsState>(
-      valueListenable: _store,
+      valueListenable: store,
       builder: (context, state, _) {
         final colorScheme = Theme.of(context).colorScheme;
         return ListView(
@@ -134,6 +133,6 @@ class _MyPageState extends State<MyPage> {
   }
 
   Future<void> _refreshOnOpen() async {
-    await _store.refreshOnOpen();
+    await context.readAppDependencies.myCollectionsStore.refreshOnOpen();
   }
 }
