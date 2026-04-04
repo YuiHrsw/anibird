@@ -3,7 +3,7 @@
 ## 项目概况
 
 - 这是一个 Flutter 客户端原型项目，用于展示 Bangumi 浏览能力和 LLM/Agent 交互能力。
-- 当前目标是可在 macOS 上运行的 MVP，不是生产级最终架构。
+- 当前目标是兼容 iOS / macOS 的客户端 MVP；现阶段主要以 macOS 作为开发和测试环境，不是生产级最终架构。
 - 现阶段重点是验证客户端交互、tool calling 流程和 Agent 可视化闭环。
 
 ## 关键代码入口
@@ -66,38 +66,28 @@
 
 ## 会话持久化设计目标
 
-- 后续多会话与聊天历史持久化，当前优先采用 `sqflite + SQLite`，避免引入 codegen / build_runner。
-- 第一阶段只让数据库承接会话相关数据，不要求一次性迁移现有全部本地存储。
-- 第一阶段核心表先收敛为两张：
-  - `chat_sessions`
-  - `chat_messages`
-- `chat_sessions` 先承接：
-  - 会话 id
-  - 会话名称
-  - 创建时间
-  - 更新时间
-  - 最后消息时间
-- `chat_messages` 先承接：
-  - 消息 id
-  - session id
-  - sequence
-  - role
-  - is_error
-  - created_at
-  - `contents_json`
-  - recommendation_subject_ids_json
-- `chat_messages` 采用统一消息抽象：每条消息只有一个 `contents` 列表字段，不再额外区分 `content` 和 `timeline` 两套持久化字段。
-- `contents_json` 用来保存这条消息的完整内容项序列；当前至少需要支持：
+- 后续多会话与聊天历史持久化，当前优先以简单文件 / JSON 方案先跑通，不急于一开始就绑定 SQL schema。
+- 当前判断依据：
+  - 会话功能范围仍在收敛中。
+  - 聊天消息 `contents` 结构仍可能继续演进。
+  - 当前不计划实现 memory system，因此暂时没有很强的复杂查询需求。
+- 第一阶段目标：
+  - 支持多会话列表
+  - 支持会话名称保存
+  - 支持聊天消息恢复
+  - 支持推荐结果引用恢复
+- 第一阶段消息模型仍采用统一消息抽象：每条消息只有一个 `contents` 列表字段，不再额外区分 `content` 和 `timeline` 两套持久化字段。
+- `contents` 当前至少需要支持：
   - `text`
   - `tool_call`
-- 用户消息和 assistant 消息都走统一的 `contents` 结构；assistant 的“最终显示文本”由 UI / repository 从 `contents` 中提取，而不是单独冗余存一份。
-- 推荐结果第一阶段继续保持现有设计：只持久化推荐时的 subject id 列表，不在消息表中冗余存完整 `Subject` 数据；会话恢复后如需展示卡片，可按 id 再异步补全。
+- 推荐结果第一阶段继续保持现有设计：只持久化推荐时的 subject id 列表，不冗余存完整 `Subject` 数据；会话恢复后如需展示卡片，可按 id 异步补全。
 - 第一阶段持久化时机约定：
   - 用户消息在发送后立即持久化。
   - assistant 消息仅在完整回答结束后持久化。
   - 用户主动中断生成时，不持久化该轮未完成的 assistant 正文。
 - 当前配置文件、图片缓存和简单缓存文件不必为了统一而立即迁入数据库；按数据类型分层存储即可。
-- 后续如需支持导入导出，运行时仍以 SQLite 为主，导出格式可以单独设计为 JSON bundle。
+- 如果后续会话结构逐渐稳定、数据量增长，且继续从开发体验出发需要更自然的对象持久化，可再评估迁移到 `Isar`。
+- 如果未来需求重新出现更强的结构化查询、排序、筛选或复杂关系，再重新评估关系型数据库方案。
 
 ## 页面级 Store 初始化迁移说明
 
