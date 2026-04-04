@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:developer' as developer;
 
-import '../../backend/api/bangumi_repository.dart';
+import '../../backend/api/bangumi/bangumi_repository.dart';
 import '../../backend/models/chat_message.dart';
 import '../../backend/models/subject.dart';
 import '../../backend/services/agent.dart';

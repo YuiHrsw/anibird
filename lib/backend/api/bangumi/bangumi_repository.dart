@@ -1,11 +1,11 @@
-import 'bangumi/bangumi_api_client.dart';
-import '../models/browse_query.dart';
-import '../models/episode.dart';
-import '../models/paged_result.dart';
-import '../models/related_character.dart';
-import '../models/related_person.dart';
-import '../models/search_query.dart';
-import '../models/subject.dart';
+import 'bangumi_api_client.dart';
+import '../../models/browse_query.dart';
+import '../../models/episode.dart';
+import '../../models/paged_result.dart';
+import '../../models/related_character.dart';
+import '../../models/related_person.dart';
+import '../../models/search_query.dart';
+import '../../models/subject.dart';
 
 class BangumiRepository {
   BangumiRepository(this._client);

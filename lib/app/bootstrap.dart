@@ -1,6 +1,10 @@
+import 'dart:io';
+
+import 'package:path_provider/path_provider.dart';
+
 import '../backend/api/bangumi/bangumi_api_client.dart';
-import '../backend/api/bangumi_private_repository.dart';
-import '../backend/api/bangumi_repository.dart';
+import '../backend/api/bangumi/bangumi_private_repository.dart';
+import '../backend/api/bangumi/bangumi_repository.dart';
 import '../backend/api/config/file_config_repository.dart';
 import '../backend/api/llm/openai_compatible_llm_provider.dart';
 import '../backend/api/my_collections_cache_repository.dart';
@@ -58,7 +62,8 @@ Future<AppDependencies> bootstrap() async {
   final discoveryStore = DiscoveryStore(bangumiRepository);
   final chatStore = ChatStore(agent, bangumiRepository);
   final timelineStore = TimelineStore(bangumiPrivateRepository);
-  final myCollectionsCacheRepository = MyCollectionsCacheRepository();
+  final myCollectionsCacheRepository =
+      await _createMyCollectionsCacheRepository();
   final myCollectionsStore = MyCollectionsStore(
     bangumiPrivateRepository,
     myCollectionsCacheRepository,
@@ -85,4 +90,16 @@ Future<AppDependencies> bootstrap() async {
     subjectDetailStoreFactory: () =>
         SubjectDetailStore(bangumiRepository, bangumiPrivateRepository),
   );
+}
+
+Future<MyCollectionsCacheRepository?> _createMyCollectionsCacheRepository() async {
+  try {
+    final directory = await getTemporaryDirectory();
+    final file = File.fromUri(
+      directory.uri.resolve('anibird_my_collections_cache.json'),
+    );
+    return MyCollectionsCacheRepository(file);
+  } catch (_) {
+    return null;
+  }
 }

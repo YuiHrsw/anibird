@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
-import 'dart:io';
+
+import 'package:dio/dio.dart';
 
 import '../config/file_config_repository.dart';
 import '../../models/app_config.dart';
@@ -18,11 +19,19 @@ class LlmConfigurationException implements Exception {
 }
 
 class OpenAICompatibleLlmProvider {
-  OpenAICompatibleLlmProvider(this._configRepository, {HttpClient? httpClient})
-    : _httpClient = httpClient ?? HttpClient();
+  OpenAICompatibleLlmProvider(this._configRepository, {Dio? dio})
+    : _dio =
+          dio ??
+          Dio(
+            BaseOptions(
+              connectTimeout: const Duration(seconds: 30),
+              receiveTimeout: const Duration(seconds: 30),
+              sendTimeout: const Duration(seconds: 30),
+            ),
+          );
 
   final FileConfigRepository _configRepository;
-  final HttpClient _httpClient;
+  final Dio _dio;
 
   Stream<LlmStreamEvent> streamChat(ChatRequest request) async* {
     final config = await _configRepository.load();
@@ -32,43 +41,59 @@ class OpenAICompatibleLlmProvider {
       'Sending LLM request to $uri with model=${config.llmModel}',
       name: 'anibird.llm',
     );
-    final httpRequest = await _httpClient.postUrl(uri);
-    httpRequest.headers.set(
-      HttpHeaders.authorizationHeader,
-      'Bearer ${config.llmApiKey.trim()}',
-    );
-    httpRequest.headers.set(
-      HttpHeaders.contentTypeHeader,
-      'application/json; charset=utf-8',
-    );
-    httpRequest.headers.set(HttpHeaders.acceptHeader, 'text/event-stream');
-    final requestBody = jsonEncode({
+
+    final requestBody = {
       'model': config.llmModel,
       'stream': true,
       'messages': request.messages.map((message) => message.toJson()).toList(),
       if (request.tools.isNotEmpty)
         'tools': request.tools.map(_toolToJson).toList(growable: false),
       if (request.tools.isNotEmpty) 'tool_choice': 'auto',
-    });
-    httpRequest.add(utf8.encode(requestBody));
+    };
 
-    final response = await httpRequest.close().timeout(
-      const Duration(seconds: 30),
-    );
-    if (response.statusCode >= 400) {
-      final text = await response.transform(utf8.decoder).join();
+    late final Response<ResponseBody> response;
+    try {
+      response = await _dio.post<ResponseBody>(
+        uri.toString(),
+        data: requestBody,
+        options: Options(
+          responseType: ResponseType.stream,
+          validateStatus: (_) => true,
+          headers: {
+            'Authorization': 'Bearer ${config.llmApiKey.trim()}',
+            'Content-Type': 'application/json; charset=utf-8',
+            'Accept': 'text/event-stream',
+          },
+        ),
+      );
+    } on DioException catch (error) {
+      throw LlmConfigurationException(
+        'LLM request failed: ${error.message ?? error.error ?? 'unknown error'}',
+      );
+    }
+
+    final responseBody = response.data;
+    if (responseBody == null) {
+      throw const LlmConfigurationException('LLM 响应为空。');
+    }
+
+    final statusCode = response.statusCode ?? 0;
+    if (statusCode >= 400) {
+      final text = await responseBody.stream
+          .map((chunk) => chunk.toList())
+          .transform(utf8.decoder)
+          .join();
       developer.log(
-        'LLM response status=${response.statusCode} body=$text',
+        'LLM response status=$statusCode body=$text',
         name: 'anibird.llm',
       );
-      if (request.tools.isNotEmpty &&
-          (response.statusCode == 400 || response.statusCode == 422)) {
+      if (request.tools.isNotEmpty && (statusCode == 400 || statusCode == 422)) {
         throw LlmConfigurationException(
           '当前模型或网关不支持 function calling / tools 请求格式：$text',
         );
       }
       throw LlmConfigurationException(
-        'LLM request failed (${response.statusCode}): $text',
+        'LLM request failed ($statusCode): $text',
       );
     }
 
@@ -76,7 +101,12 @@ class OpenAICompatibleLlmProvider {
     final toolBuilders = <int, _ToolCallAccumulator>{};
 
     await for (final line
-        in response.transform(utf8.decoder).transform(const LineSplitter())) {
+        in responseBody.stream
+            .map((chunk) => chunk.toList())
+            .transform(utf8.decoder)
+            .transform(
+          const LineSplitter(),
+        )) {
       if (!line.startsWith('data: ')) {
         continue;
       }

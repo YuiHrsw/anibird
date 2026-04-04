@@ -1,14 +1,14 @@
-import 'bangumi/bangumi_api_client.dart';
-import '../models/paged_result.dart';
-import '../models/episode.dart';
-import '../models/subject.dart';
-import '../models/bangumi_profile.dart';
-import '../models/episode_comment.dart';
-import '../models/subject_discussion.dart';
-import '../models/subject_review.dart';
-import '../models/timeline_item.dart';
-import '../models/blog_entry.dart';
-import '../models/blog_comment.dart';
+import 'bangumi_api_client.dart';
+import '../../models/paged_result.dart';
+import '../../models/episode.dart';
+import '../../models/subject.dart';
+import '../../models/bangumi_profile.dart';
+import '../../models/episode_comment.dart';
+import '../../models/subject_discussion.dart';
+import '../../models/subject_review.dart';
+import '../../models/timeline_item.dart';
+import '../../models/blog_entry.dart';
+import '../../models/blog_comment.dart';
 
 class BangumiPrivateRepository {
   BangumiPrivateRepository(this._client);

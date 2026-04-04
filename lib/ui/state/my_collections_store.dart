@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
-import '../../backend/api/bangumi_private_repository.dart';
+import '../../backend/api/bangumi/bangumi_private_repository.dart';
 import '../../backend/api/my_collections_cache_repository.dart';
 import '../../backend/models/subject.dart';
 
@@ -67,7 +67,7 @@ class MyCollectionsStore extends ValueNotifier<MyCollectionsState> {
   ];
 
   final BangumiPrivateRepository _repository;
-  final MyCollectionsCacheRepository _cacheRepository;
+  final MyCollectionsCacheRepository? _cacheRepository;
   Map<int, List<Subject>> _itemsByType = <int, List<Subject>>{};
   bool _cacheLoaded = false;
   bool _refreshing = false;
@@ -99,7 +99,9 @@ class MyCollectionsStore extends ValueNotifier<MyCollectionsState> {
     if (_cacheLoaded) {
       return;
     }
-    _itemsByType = Map<int, List<Subject>>.from(await _cacheRepository.loadAll());
+    _itemsByType = Map<int, List<Subject>>.from(
+      await _cacheRepository?.loadAll() ?? const <int, List<Subject>>{},
+    );
     _cacheLoaded = true;
   }
 
@@ -127,12 +129,12 @@ class MyCollectionsStore extends ValueNotifier<MyCollectionsState> {
       for (final type in _trackedTypes) {
         try {
           final nextItems = await _fetchAllForType(type);
-          final cachedItems = _itemsForType(type);
-          if (!_sameSubjects(cachedItems, nextItems)) {
-            _itemsByType[type] = List<Subject>.unmodifiable(nextItems);
-            await _cacheRepository.save(type, nextItems);
-            hasChanges = true;
-          }
+            final cachedItems = _itemsForType(type);
+            if (!_sameSubjects(cachedItems, nextItems)) {
+              _itemsByType[type] = List<Subject>.unmodifiable(nextItems);
+              await _cacheRepository?.save(type, nextItems);
+              hasChanges = true;
+            }
         } catch (error) {
           firstError ??= error;
         }

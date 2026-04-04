@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-import '../../backend/api/bangumi_repository.dart';
+import '../../backend/api/bangumi/bangumi_repository.dart';
 import '../../backend/models/browse_query.dart';
 import '../../backend/models/search_query.dart';
 import '../../backend/models/subject.dart';

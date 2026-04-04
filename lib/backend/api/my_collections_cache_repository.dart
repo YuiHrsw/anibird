@@ -4,10 +4,7 @@ import 'dart:io';
 import '../models/subject.dart';
 
 class MyCollectionsCacheRepository {
-  MyCollectionsCacheRepository({String? fileName})
-    : _file = File(
-        '${Directory.current.path}/${fileName ?? '.anibird_my_collections_cache.json'}',
-      );
+  MyCollectionsCacheRepository(this._file);
 
   final File _file;
   Map<int, List<Subject>>? _cached;

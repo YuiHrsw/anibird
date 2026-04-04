@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 
-import '../../backend/api/bangumi_private_repository.dart';
-import '../../backend/api/bangumi_repository.dart';
+import '../../backend/api/bangumi/bangumi_private_repository.dart';
+import '../../backend/api/bangumi/bangumi_repository.dart';
 import '../../backend/models/episode.dart';
 import '../../backend/models/episode_comment.dart';
 import '../../backend/models/blog_comment.dart';

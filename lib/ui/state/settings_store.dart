@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'dart:async';
 
-import '../../backend/api/bangumi_private_repository.dart';
+import '../../backend/api/bangumi/bangumi_private_repository.dart';
 import '../../backend/api/config/file_config_repository.dart';
 import '../../backend/models/app_config.dart';
 import '../../backend/models/bangumi_oauth_token.dart';

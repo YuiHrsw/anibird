@@ -1,4 +1,4 @@
-import '../api/bangumi_repository.dart';
+import '../api/bangumi/bangumi_repository.dart';
 import '../models/browse_query.dart';
 import '../models/search_query.dart';
 import '../models/subject.dart';
@@ -166,7 +166,10 @@ class GetSubjectDetailTool implements AgentTool {
       toolName: definition.name,
       summary: '已获取《${subject.displayName}》详情。',
       payload: payload,
-      observationText: _payloadObservation(label: 'Subject detail', payload: payload),
+      observationText: _payloadObservation(
+        label: 'Subject detail',
+        payload: payload,
+      ),
       subjects: [subject],
     );
   }
@@ -251,7 +254,10 @@ class GetSubjectCastTool implements AgentTool {
       toolName: definition.name,
       summary: '获取到 ${characters.length} 个角色和 ${persons.length} 位制作相关人物。',
       payload: payload,
-      observationText: _payloadObservation(label: 'Subject cast', payload: payload),
+      observationText: _payloadObservation(
+        label: 'Subject cast',
+        payload: payload,
+      ),
     );
   }
 }
@@ -286,7 +292,9 @@ class GetSubjectEpisodesTool implements AgentTool {
       offset: _asInt(input['offset']),
     );
     final payload = {
-      'episodes': result.data.map((item) => item.toJson()).toList(growable: false),
+      'episodes': result.data
+          .map((item) => item.toJson())
+          .toList(growable: false),
       'total': result.total,
     };
     return ToolResult(
@@ -318,13 +326,18 @@ class GetEpisodeDetailTool implements AgentTool {
 
   @override
   Future<ToolResult> execute(Map<String, dynamic> input) async {
-    final episode = await _repository.getEpisodeDetail(_asInt(input['episode_id']));
+    final episode = await _repository.getEpisodeDetail(
+      _asInt(input['episode_id']),
+    );
     final payload = {'episode': episode.toJson()};
     return ToolResult(
       toolName: definition.name,
       summary: '已获取单集《${episode.displayName}》详情。',
       payload: payload,
-      observationText: _payloadObservation(label: 'Episode detail', payload: payload),
+      observationText: _payloadObservation(
+        label: 'Episode detail',
+        payload: payload,
+      ),
     );
   }
 }
@@ -382,7 +395,10 @@ class PresentRecommendationsTool implements AgentTool {
   @override
   ToolDefinition get definition => const ToolDefinition(
     name: 'present_recommendations',
-    description: '在回答末尾显式提交最终要展示给用户的推荐条目列表。请只传你最终决定推荐的 subject_id，顺序就是展示顺序。',
+    description: '''
+希望在回答末尾展示给用户的推荐条目列表。请只传你最终决定推荐的 subject_id，顺序就是展示顺序。
+如果要调用 present_recommendations，必须在给出最终回答之前提前调用，否则用户无法正常看到你输出的结果。
+''',
     inputSchema: {
       'type': 'object',
       'properties': {

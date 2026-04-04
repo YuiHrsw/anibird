@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-import '../../backend/api/bangumi_private_repository.dart';
+import '../../backend/api/bangumi/bangumi_private_repository.dart';
 import '../../backend/models/timeline_item.dart';
 
 class TimelineMode {

@@ -1,6 +1,6 @@
 import 'package:flutter/widgets.dart';
 
-import '../backend/api/bangumi_repository.dart';
+import '../backend/api/bangumi/bangumi_repository.dart';
 import '../ui/state/chat_store.dart';
 import '../ui/state/discovery_store.dart';
 import '../ui/state/my_collections_store.dart';

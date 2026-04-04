@@ -9,7 +9,7 @@ class AppCacheService {
     Future<void> Function()? clearVolatileCaches,
   }) : _clearVolatileCaches = clearVolatileCaches;
 
-  final MyCollectionsCacheRepository _myCollectionsCacheRepository;
+  final MyCollectionsCacheRepository? _myCollectionsCacheRepository;
   final Future<void> Function()? _clearVolatileCaches;
 
   Future<void> clearImageCache() async {
@@ -20,7 +20,7 @@ class AppCacheService {
 
   Future<void> clearAllCaches() async {
     await clearImageCache();
-    await _myCollectionsCacheRepository.clear();
+    await _myCollectionsCacheRepository?.clear();
     await _clearVolatileCaches?.call();
   }
 }

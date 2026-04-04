@@ -244,11 +244,12 @@ String _buildSystemPrompt() {
 
 请优先通过 Bangumi 工具获取事实，再回答用户问题。
 如果你希望在回答下方展示推荐卡片，可以调用 present_recommendations，并按展示顺序传入 subject_id。
-如果要调用 present_recommendations，请在给出最终回答之前提前调用，这样用户才能正常看到你输出的结果。
 搜索工具的 sort 只能使用 match、heat、rank、score；不确定时优先用 match。
 如果工具结果显示 ok=false 或错误信息，请根据已有信息自行判断是否继续调用工具、调整参数，或直接回答。
 最终回答使用中文 Markdown，并明确说明“基于 Bangumi 数据检索结果整理”。
 除非用户明确要求极短回答，否则尽量给出详细清晰的回答。
+
+如果要调用 present_recommendations，必须在给出最终回答之前提前调用，否则用户无法正常看到你输出的结果。
 ''';
 }
 
