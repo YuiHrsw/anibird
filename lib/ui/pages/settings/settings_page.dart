@@ -183,10 +183,7 @@ class _SettingsPageState extends State<SettingsPage> {
         return SettingsSectionDefinition(
           icon: Icons.api_outlined,
           title: 'Bangumi 设置',
-          subtitle: state.config.bangumiPrivateApiBaseUrl.trim().isEmpty
-              ? 'API、OAuth、账号状态'
-              : (state.bangumiProfile?.displayName ??
-                    state.config.bangumiPrivateApiBaseUrl.trim()),
+          subtitle: state.bangumiProfile?.displayName ?? 'OAuth 与账号状态',
           children: [
             BangumiSettingsSection(store: context.settingsStore),
           ],

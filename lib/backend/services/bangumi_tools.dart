@@ -1,7 +1,16 @@
+import '../api/bangumi/bangumi_private_repository.dart';
 import '../api/bangumi/bangumi_repository.dart';
+import '../api/my_collections_cache_repository.dart';
+import '../models/bangumi_profile.dart';
 import '../models/browse_query.dart';
+import '../models/blog_comment.dart';
+import '../models/blog_entry.dart';
+import '../models/episode_comment.dart';
 import '../models/search_query.dart';
 import '../models/subject.dart';
+import '../models/subject_discussion.dart';
+import '../models/subject_review.dart';
+import '../models/timeline_item.dart';
 import '../models/tool.dart';
 
 const int _defaultListLimit = 6;
@@ -24,10 +33,11 @@ class SubjectSnapshotCache {
 }
 
 class SearchAnimeTool implements AgentTool {
-  SearchAnimeTool(this._repository, this._cache);
+  SearchAnimeTool(this._repository, this._cache, this._collectionsCacheRepository);
 
-  final BangumiRepository _repository;
+  final BangumiPrivateRepository _repository;
   final SubjectSnapshotCache _cache;
+  final MyCollectionsCacheRepository? _collectionsCacheRepository;
 
   @override
   ToolDefinition get definition => const ToolDefinition(
@@ -65,14 +75,22 @@ class SearchAnimeTool implements AgentTool {
         limit: _boundedLimit(input['limit'], fallback: _defaultListLimit),
       ),
     );
+    final collectionTypeBySubjectId =
+        await _collectionsCacheRepository?.loadSubjectTypeMap() ??
+        const <int, int>{};
     _cache.rememberAll(result.data);
+    final payload = {
+      'results': result.data
+          .map((item) => _searchSubjectToToolJson(item, collectionTypeBySubjectId))
+          .toList(growable: false),
+    };
     return ToolResult(
       toolName: definition.name,
       summary: '找到 ${result.data.length} 个候选条目。',
-      payload: {'results': result.data.map((item) => item.toJson()).toList()},
+      payload: payload,
       observationText: _payloadObservation(
         label: 'Search results',
-        payload: {'results': result.data.map((item) => item.toJson()).toList()},
+        payload: payload,
       ),
       subjects: result.data,
     );
@@ -80,10 +98,15 @@ class SearchAnimeTool implements AgentTool {
 }
 
 class SearchSubjectsByTagsTool implements AgentTool {
-  SearchSubjectsByTagsTool(this._repository, this._cache);
+  SearchSubjectsByTagsTool(
+    this._repository,
+    this._cache,
+    this._collectionsCacheRepository,
+  );
 
-  final BangumiRepository _repository;
+  final BangumiPrivateRepository _repository;
   final SubjectSnapshotCache _cache;
+  final MyCollectionsCacheRepository? _collectionsCacheRepository;
 
   @override
   ToolDefinition get definition => const ToolDefinition(
@@ -122,14 +145,22 @@ class SearchSubjectsByTagsTool implements AgentTool {
         limit: _boundedLimit(input['limit'], fallback: _defaultListLimit),
       ),
     );
+    final collectionTypeBySubjectId =
+        await _collectionsCacheRepository?.loadSubjectTypeMap() ??
+        const <int, int>{};
     _cache.rememberAll(result.data);
+    final payload = {
+      'results': result.data
+          .map((item) => _searchSubjectToToolJson(item, collectionTypeBySubjectId))
+          .toList(growable: false),
+    };
     return ToolResult(
       toolName: definition.name,
       summary: '按标签找到 ${result.data.length} 个更相关的候选条目。',
-      payload: {'results': result.data.map((item) => item.toJson()).toList()},
+      payload: payload,
       observationText: _payloadObservation(
         label: 'Tagged search results',
-        payload: {'results': result.data.map((item) => item.toJson()).toList()},
+        payload: payload,
       ),
       subjects: result.data,
     );
@@ -139,13 +170,14 @@ class SearchSubjectsByTagsTool implements AgentTool {
 class GetSubjectDetailTool implements AgentTool {
   GetSubjectDetailTool(this._repository, this._cache);
 
-  final BangumiRepository _repository;
+  final BangumiPrivateRepository _repository;
   final SubjectSnapshotCache _cache;
 
   @override
   ToolDefinition get definition => const ToolDefinition(
     name: 'get_subject_detail',
-    description: '按 Bangumi subject id 获取条目详情。',
+    description:
+        '按 Bangumi subject id 获取条目详情。如果能看到用户的收藏状态, 那么最好不要给用户推荐已看过/抛弃的番剧',
     inputSchema: {
       'type': 'object',
       'properties': {
@@ -161,7 +193,7 @@ class GetSubjectDetailTool implements AgentTool {
       _asInt(input['subject_id']),
     );
     _cache.rememberAll([subject]);
-    final payload = {'subject': subject.toJson()};
+    final payload = {'subject': _subjectDetailToJson(subject)};
     return ToolResult(
       toolName: definition.name,
       summary: '已获取《${subject.displayName}》详情。',
@@ -202,13 +234,16 @@ class GetRelatedSubjectsTool implements AgentTool {
             .take(_boundedLimit(input['limit'], fallback: _defaultListLimit))
             .toList(growable: false);
     _cache.rememberAll(subjects);
+    final payload = {
+      'results': subjects.map(_subjectToToolJson).toList(growable: false),
+    };
     return ToolResult(
       toolName: definition.name,
       summary: '获取到 ${subjects.length} 个关联条目。',
-      payload: {'results': subjects.map((item) => item.toJson()).toList()},
+      payload: payload,
       observationText: _payloadObservation(
         label: 'Related subjects',
-        payload: {'results': subjects.map((item) => item.toJson()).toList()},
+        payload: payload,
       ),
       subjects: subjects,
     );
@@ -374,15 +409,420 @@ class BrowseSubjectsTool implements AgentTool {
       ),
     );
     _cache.rememberAll(result.data);
+    final payload = {
+      'results': result.data.map(_subjectToToolJson).toList(growable: false),
+    };
     return ToolResult(
       toolName: definition.name,
       summary: '浏览结果共返回 ${result.data.length} 个条目。',
-      payload: {'results': result.data.map((item) => item.toJson()).toList()},
+      payload: payload,
       observationText: _payloadObservation(
         label: 'Browse results',
-        payload: {'results': result.data.map((item) => item.toJson()).toList()},
+        payload: payload,
       ),
       subjects: result.data,
+    );
+  }
+}
+
+class GetMyProfileTool implements AgentTool {
+  GetMyProfileTool(this._repository);
+
+  final BangumiPrivateRepository _repository;
+
+  @override
+  ToolDefinition get definition => const ToolDefinition(
+    name: 'get_my_profile',
+    description: '读取当前登录 Bangumi 用户资料。',
+    inputSchema: {'type': 'object', 'properties': {}},
+  );
+
+  @override
+  Future<ToolResult> execute(Map<String, dynamic> input) async {
+    final profile = await _repository.getCurrentUser();
+    final payload = {'profile': _profileToJson(profile)};
+    return ToolResult(
+      toolName: definition.name,
+      summary: '已读取当前登录用户资料。',
+      payload: payload,
+      observationText: _payloadObservation(
+        label: 'My profile',
+        payload: payload,
+      ),
+    );
+  }
+}
+
+class GetMyCollectionsTool implements AgentTool {
+  GetMyCollectionsTool(this._repository, this._cache);
+
+  final BangumiPrivateRepository _repository;
+  final SubjectSnapshotCache _cache;
+
+  @override
+  ToolDefinition get definition => const ToolDefinition(
+    name: 'get_my_collections',
+    description:
+        '读取当前账号的动画收藏列表，可按收藏状态筛选。type 含义：1=想看，2=看过，3=在看，4=搁置，5=抛弃；默认 3=在看。',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'type': {
+          'type': 'integer',
+          'description': '收藏状态：1=想看，2=看过，3=在看，4=搁置，5=抛弃。',
+        },
+        'limit': {'type': 'integer'},
+        'offset': {'type': 'integer'},
+      },
+    },
+  );
+
+  @override
+  Future<ToolResult> execute(Map<String, dynamic> input) async {
+    final result = await _repository.getMySubjectCollections(
+      type: _asInt(input['type'], fallback: 3),
+      limit: _boundedLimit(input['limit'], fallback: _defaultListLimit),
+      offset: _asInt(input['offset']),
+    );
+    _cache.rememberAll(result.data);
+    final payload = {
+      'results': result.data
+          .map(
+            (item) => {
+              'id': item.id,
+              'name': item.name,
+              'name_cn': item.nameCn,
+              'type': _collectionTypeLabel(
+                item.interest?.type ?? _asInt(input['type'], fallback: 3),
+              ),
+            },
+          )
+          .toList(growable: false),
+      'total': result.total,
+      'offset': result.offset,
+      'limit': result.limit,
+    };
+    return ToolResult(
+      toolName: definition.name,
+      summary: '获取到 ${result.data.length} 个我的收藏条目。',
+      payload: payload,
+      observationText: _payloadObservation(
+        label: 'My collections',
+        payload: payload,
+      ),
+      subjects: result.data,
+    );
+  }
+}
+
+class GetEpisodeCommentsTool implements AgentTool {
+  GetEpisodeCommentsTool(this._repository);
+
+  final BangumiPrivateRepository _repository;
+
+  @override
+  ToolDefinition get definition => const ToolDefinition(
+    name: 'get_episode_comments',
+    description: '读取单集评论和回复。',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'episode_id': {'type': 'integer'},
+        'limit': {'type': 'integer'},
+      },
+      'required': ['episode_id'],
+    },
+  );
+
+  @override
+  Future<ToolResult> execute(Map<String, dynamic> input) async {
+    final comments =
+        (await _repository.getEpisodeComments(_asInt(input['episode_id'])))
+            .take(_boundedLimit(input['limit'], fallback: _defaultListLimit))
+            .map(_episodeCommentToJson)
+            .toList(growable: false);
+    final payload = {'results': comments};
+    return ToolResult(
+      toolName: definition.name,
+      summary: '获取到 ${comments.length} 条单集评论。',
+      payload: payload,
+      observationText: _payloadObservation(
+        label: 'Episode comments',
+        payload: payload,
+      ),
+    );
+  }
+}
+
+class GetSubjectCommentsTool implements AgentTool {
+  GetSubjectCommentsTool(this._repository);
+
+  final BangumiPrivateRepository _repository;
+
+  @override
+  ToolDefinition get definition => const ToolDefinition(
+    name: 'get_subject_comments',
+    description: '读取条目短评和吐槽。',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'subject_id': {'type': 'integer'},
+        'limit': {'type': 'integer'},
+        'offset': {'type': 'integer'},
+      },
+      'required': ['subject_id'],
+    },
+  );
+
+  @override
+  Future<ToolResult> execute(Map<String, dynamic> input) async {
+    final result = await _repository.getSubjectComments(
+      _asInt(input['subject_id']),
+      limit: _boundedLimit(input['limit'], fallback: _defaultListLimit),
+      offset: _asInt(input['offset']),
+    );
+    final payload = {
+      'results': result.data.map(_subjectCommentToJson).toList(growable: false),
+      'total': result.total,
+      'offset': result.offset,
+      'limit': result.limit,
+    };
+    return ToolResult(
+      toolName: definition.name,
+      summary: '获取到 ${result.data.length} 条条目评论。',
+      payload: payload,
+      observationText: _payloadObservation(
+        label: 'Subject comments',
+        payload: payload,
+      ),
+    );
+  }
+}
+
+class GetSubjectTopicsTool implements AgentTool {
+  GetSubjectTopicsTool(this._repository);
+
+  final BangumiPrivateRepository _repository;
+
+  @override
+  ToolDefinition get definition => const ToolDefinition(
+    name: 'get_subject_topics',
+    description: '读取条目讨论主题。',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'subject_id': {'type': 'integer'},
+        'limit': {'type': 'integer'},
+        'offset': {'type': 'integer'},
+      },
+      'required': ['subject_id'],
+    },
+  );
+
+  @override
+  Future<ToolResult> execute(Map<String, dynamic> input) async {
+    final result = await _repository.getSubjectTopics(
+      _asInt(input['subject_id']),
+      limit: _boundedLimit(input['limit'], fallback: _defaultListLimit),
+      offset: _asInt(input['offset']),
+    );
+    final payload = {
+      'results': result.data.map(_subjectTopicToJson).toList(growable: false),
+      'total': result.total,
+      'offset': result.offset,
+      'limit': result.limit,
+    };
+    return ToolResult(
+      toolName: definition.name,
+      summary: '获取到 ${result.data.length} 个讨论主题。',
+      payload: payload,
+      observationText: _payloadObservation(
+        label: 'Subject topics',
+        payload: payload,
+      ),
+    );
+  }
+}
+
+class GetSubjectReviewsTool implements AgentTool {
+  GetSubjectReviewsTool(this._repository);
+
+  final BangumiPrivateRepository _repository;
+
+  @override
+  ToolDefinition get definition => const ToolDefinition(
+    name: 'get_subject_reviews',
+    description: '读取条目的长评摘要。',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'subject_id': {'type': 'integer'},
+        'limit': {'type': 'integer'},
+        'offset': {'type': 'integer'},
+      },
+      'required': ['subject_id'],
+    },
+  );
+
+  @override
+  Future<ToolResult> execute(Map<String, dynamic> input) async {
+    final result = await _repository.getSubjectReviews(
+      _asInt(input['subject_id']),
+      limit: _boundedLimit(input['limit'], fallback: _defaultListLimit),
+      offset: _asInt(input['offset']),
+    );
+    final payload = {
+      'results': result.data.map(_subjectReviewToJson).toList(growable: false),
+      'total': result.total,
+      'offset': result.offset,
+      'limit': result.limit,
+    };
+    return ToolResult(
+      toolName: definition.name,
+      summary: '获取到 ${result.data.length} 条长评摘要。',
+      payload: payload,
+      observationText: _payloadObservation(
+        label: 'Subject reviews',
+        payload: payload,
+      ),
+    );
+  }
+}
+
+class GetTimelineTool implements AgentTool {
+  GetTimelineTool(this._repository);
+
+  final BangumiPrivateRepository _repository;
+
+  @override
+  ToolDefinition get definition => const ToolDefinition(
+    name: 'get_timeline',
+    description: '读取 Bangumi 时间线动态。',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'mode': {
+          'type': 'string',
+          'enum': ['friends', 'all'],
+        },
+        'limit': {'type': 'integer'},
+        'until': {'type': 'integer'},
+      },
+    },
+  );
+
+  @override
+  Future<ToolResult> execute(Map<String, dynamic> input) async {
+    final items = await _repository.getTimeline(
+      mode: input['mode']?.toString() ?? 'friends',
+      limit: _boundedLimit(input['limit'], fallback: _defaultListLimit),
+      until: input['until'] == null ? null : _asInt(input['until']),
+    );
+    final payload = {
+      'results': items.map(_timelineItemToJson).toList(growable: false),
+    };
+    return ToolResult(
+      toolName: definition.name,
+      summary: '获取到 ${items.length} 条时间线动态。',
+      payload: payload,
+      observationText: _payloadObservation(label: 'Timeline', payload: payload),
+    );
+  }
+}
+
+class GetBlogEntryTool implements AgentTool {
+  GetBlogEntryTool(this._repository);
+
+  final BangumiPrivateRepository _repository;
+
+  @override
+  ToolDefinition get definition => const ToolDefinition(
+    name: 'get_blog_entry',
+    description: '读取日志正文内容。',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'entry_id': {'type': 'integer'},
+      },
+      'required': ['entry_id'],
+    },
+  );
+
+  @override
+  Future<ToolResult> execute(Map<String, dynamic> input) async {
+    final entry = await _repository.getBlogEntry(_asInt(input['entry_id']));
+    final payload = {'entry': _blogEntryToJson(entry)};
+    return ToolResult(
+      toolName: definition.name,
+      summary: '已获取日志《${entry.title}》详情。',
+      payload: payload,
+      observationText: _payloadObservation(
+        label: 'Blog entry',
+        payload: payload,
+      ),
+    );
+  }
+}
+
+class GetBlogCommentsTool implements AgentTool {
+  GetBlogCommentsTool(this._repository);
+
+  final BangumiPrivateRepository _repository;
+
+  @override
+  ToolDefinition get definition => const ToolDefinition(
+    name: 'get_blog_comments',
+    description: '读取日志评论和回复。',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'entry_id': {'type': 'integer'},
+        'limit': {'type': 'integer'},
+      },
+      'required': ['entry_id'],
+    },
+  );
+
+  @override
+  Future<ToolResult> execute(Map<String, dynamic> input) async {
+    final comments =
+        (await _repository.getBlogComments(_asInt(input['entry_id'])))
+            .take(_boundedLimit(input['limit'], fallback: _defaultListLimit))
+            .map(_blogCommentToJson)
+            .toList(growable: false);
+    final payload = {'results': comments};
+    return ToolResult(
+      toolName: definition.name,
+      summary: '获取到 ${comments.length} 条日志评论。',
+      payload: payload,
+      observationText: _payloadObservation(
+        label: 'Blog comments',
+        payload: payload,
+      ),
+    );
+  }
+}
+
+class MarkFinalAnswerStartTool implements AgentTool {
+  @override
+  ToolDefinition get definition => const ToolDefinition(
+    name: 'mark_final_answer_start',
+    description: '''
+标记从这里开始进入最终给用户展示的答案区。
+请在开始输出最终答案正文之前调用。
+如果后续再次调用本工具，则应以前一次调用后的内容视为旧答案，以最后一次调用后的内容为准。
+''',
+    inputSchema: {'type': 'object', 'properties': {}},
+  );
+
+  @override
+  Future<ToolResult> execute(Map<String, dynamic> input) async {
+    const payload = {'ok': true, 'marked': true};
+    return const ToolResult(
+      toolName: 'mark_final_answer_start',
+      summary: '已标记最终答案开始位置。',
+      payload: payload,
+      observationText: 'Final answer start marked.',
     );
   }
 }
@@ -394,10 +834,12 @@ class PresentRecommendationsTool implements AgentTool {
 
   @override
   ToolDefinition get definition => const ToolDefinition(
-    name: 'present_recommendations',
+    name: 'set_recommendations',
     description: '''
-希望在回答末尾展示给用户的推荐条目列表。请只传你最终决定推荐的 subject_id，顺序就是展示顺序。
-如果要调用 present_recommendations，必须在给出最终回答之前提前调用，否则用户无法正常看到你输出的结果。
+建议在开始回答之前提前调用此工具, 以避免向用户展示多余的调用记录, 同时也有助于提前解决错误
+
+如果你希望在回答下方展示推荐卡片以方便用户快速跳转，可以调用 set_recommendations, 并按展示顺序传入 subject_id。
+请只传你最终决定推荐的 subject_id, 顺序就是展示顺序.
 ''',
     inputSchema: {
       'type': 'object',
@@ -457,19 +899,263 @@ class PresentRecommendationsTool implements AgentTool {
   }
 }
 
-List<AgentTool> buildBangumiTools(BangumiRepository repository) {
+List<AgentTool> buildBangumiTools(
+  BangumiRepository repository,
+  BangumiPrivateRepository privateRepository,
+  MyCollectionsCacheRepository? myCollectionsCacheRepository,
+) {
   final cache = SubjectSnapshotCache();
   return [
-    SearchAnimeTool(repository, cache),
-    SearchSubjectsByTagsTool(repository, cache),
-    GetSubjectDetailTool(repository, cache),
+    SearchAnimeTool(privateRepository, cache, myCollectionsCacheRepository),
+    SearchSubjectsByTagsTool(
+      privateRepository,
+      cache,
+      myCollectionsCacheRepository,
+    ),
+    GetSubjectDetailTool(privateRepository, cache),
     GetRelatedSubjectsTool(repository, cache),
     GetSubjectCastTool(repository),
     GetSubjectEpisodesTool(repository),
     GetEpisodeDetailTool(repository),
     BrowseSubjectsTool(repository, cache),
+    GetMyProfileTool(privateRepository),
+    GetMyCollectionsTool(privateRepository, cache),
+    GetEpisodeCommentsTool(privateRepository),
+    GetSubjectCommentsTool(privateRepository),
+    GetSubjectTopicsTool(privateRepository),
+    GetSubjectReviewsTool(privateRepository),
+    GetTimelineTool(privateRepository),
+    GetBlogEntryTool(privateRepository),
+    GetBlogCommentsTool(privateRepository),
+    MarkFinalAnswerStartTool(),
     PresentRecommendationsTool(cache),
   ];
+}
+
+Map<String, dynamic> _profileToJson(BangumiProfile value) {
+  return {
+    'id': value.id,
+    'username': value.username,
+    'nickname': value.nickname,
+    'avatar': value.avatar,
+    'sign': value.sign,
+    'group': value.group,
+    'joinedAt': value.joinedAt,
+    'site': value.site,
+    'location': value.location,
+    'permissions': {'subjectWikiEdit': value.permissions.subjectWikiEdit},
+  };
+}
+
+Map<String, dynamic> _subjectDiscussionUserToJson(
+  SubjectDiscussionUser? value,
+) {
+  if (value == null) {
+    return const <String, dynamic>{};
+  }
+  return {
+    'id': value.id,
+    'username': value.username,
+    'nickname': value.nickname,
+    'avatar': value.avatar,
+  };
+}
+
+Map<String, dynamic> _subjectCommentToJson(SubjectComment value) {
+  return {
+    'type': _collectionTypeLabel(value.type),
+    'rate': value.rate,
+    'comment': value.comment,
+  };
+}
+
+Map<String, dynamic> _subjectTopicToJson(SubjectTopic value) {
+  return {
+    'id': value.id,
+    'title': value.title,
+    'creatorId': value.creatorId,
+    'creator': _subjectDiscussionUserToJson(value.creator),
+    'parentId': value.parentId,
+    'replyCount': value.replyCount,
+    'createdAt': value.createdAt,
+    'updatedAt': value.updatedAt,
+    'state': value.state,
+    'display': value.display,
+  };
+}
+
+Map<String, dynamic> _subjectReviewToJson(SubjectReview value) {
+  return {
+    'id': value.id,
+    'title': value.entry.title,
+    'summary': value.entry.summary,
+  };
+}
+
+Map<String, dynamic> _episodeCommentToJson(EpisodeComment value) {
+  return {'content': value.content};
+}
+
+Map<String, dynamic> _timelineUserToJson(TimelineUser? value) {
+  if (value == null) {
+    return const <String, dynamic>{};
+  }
+  return {
+    'id': value.id,
+    'username': value.username,
+    'nickname': value.nickname,
+    'avatar': value.avatar,
+  };
+}
+
+Map<String, dynamic> _timelineSubjectToJson(TimelineSubjectRef value) {
+  return {
+    'id': value.id,
+    'name': value.name,
+    'nameCn': value.nameCn,
+    'image': value.image,
+  };
+}
+
+Map<String, dynamic> _timelineItemToJson(TimelineItem value) {
+  return {
+    'id': value.id,
+    'uid': value.uid,
+    'cat': value.cat,
+    'type': value.type,
+    'batch': value.batch,
+    'replies': value.replies,
+    'createdAt': value.createdAt,
+    'user': _timelineUserToJson(value.user),
+    'sourceName': value.sourceName,
+    'sourceUrl': value.sourceUrl,
+    'summary': value.summary,
+    'detail': value.detail,
+    'subjects': value.subjects
+        .map(_timelineSubjectToJson)
+        .toList(growable: false),
+  };
+}
+
+Map<String, dynamic> _subjectDetailToJson(Subject value) {
+  final data = _subjectToToolJson(value);
+  data.remove('interest');
+  data['tags'] = _formatSubjectTags(value.tags);
+  data['meta_tags'] = _formatStringList(value.metaTags);
+  return data;
+}
+
+Map<String, dynamic> _searchSubjectToToolJson(
+  Subject value,
+  Map<int, int> collectionTypeBySubjectId,
+) {
+  final data = _subjectToToolJson(
+    value,
+    collectionTypeOverride: collectionTypeBySubjectId[value.id],
+  );
+  data.remove('summary');
+  data.remove('tags');
+  data.remove('relation');
+  data.remove('interest');
+  data.remove('meta_tags');
+  data.remove('total_episodes');
+  data.remove('eps');
+  data.remove('image');
+  data.remove('total');
+  return data;
+}
+
+Map<String, dynamic> _subjectToToolJson(
+  Subject value, {
+  int? collectionTypeOverride,
+}) {
+  final data = value.toJson();
+  data['type'] = _collectionTypeLabel(
+    collectionTypeOverride ?? value.interest?.type ?? 0,
+  );
+  return data;
+}
+
+String _formatSubjectTags(List<SubjectTag> tags) {
+  return tags
+      .map((tag) => '${tag.name}(${tag.count})')
+      .where((item) => item.isNotEmpty)
+      .join(', ');
+}
+
+String _formatStringList(List<String> items) {
+  return items.where((item) => item.trim().isNotEmpty).join(', ');
+}
+
+Map<String, dynamic> _blogEntryToJson(BlogEntry value) {
+  return {
+    'id': value.id,
+    'title': value.title,
+    'content': value.content,
+    'replies': value.replies,
+    'createdAt': value.createdAt,
+    'updatedAt': value.updatedAt,
+    'user': {
+      'id': value.user?.id ?? 0,
+      'username': value.user?.username ?? '',
+      'nickname': value.user?.nickname ?? '',
+      'avatar': value.user?.avatar ?? '',
+    },
+  };
+}
+
+Map<String, dynamic> _blogCommentUserToJson(BlogCommentUser? value) {
+  if (value == null) {
+    return const <String, dynamic>{};
+  }
+  return {
+    'id': value.id,
+    'username': value.username,
+    'nickname': value.nickname,
+    'avatar': value.avatar,
+  };
+}
+
+Map<String, dynamic> _blogCommentReplyToJson(BlogCommentReply value) {
+  return {
+    'id': value.id,
+    'creatorId': value.creatorId,
+    'createdAt': value.createdAt,
+    'content': value.content,
+    'state': value.state,
+    'user': _blogCommentUserToJson(value.user),
+  };
+}
+
+Map<String, dynamic> _blogCommentToJson(BlogComment value) {
+  return {
+    'id': value.id,
+    'creatorId': value.creatorId,
+    'createdAt': value.createdAt,
+    'content': value.content,
+    'state': value.state,
+    'user': _blogCommentUserToJson(value.user),
+    'replies': value.replies
+        .map(_blogCommentReplyToJson)
+        .toList(growable: false),
+  };
+}
+
+String _collectionTypeLabel(int type) {
+  switch (type) {
+    case 1:
+      return '想看';
+    case 2:
+      return '看过';
+    case 3:
+      return '在看';
+    case 4:
+      return '搁置';
+    case 5:
+      return '抛弃';
+    default:
+      return '未看';
+  }
 }
 
 int _asInt(Object? value, {int fallback = 0}) {

@@ -14,11 +14,7 @@ class SubjectCollectionType {
   static const int dropped = 5;
 }
 
-enum MyCollectionsRefreshResult {
-  refreshed,
-  noNewData,
-  failed,
-}
+enum MyCollectionsRefreshResult { refreshed, noNewData, failed }
 
 @immutable
 class MyCollectionsState {
@@ -84,6 +80,18 @@ class MyCollectionsStore extends ValueNotifier<MyCollectionsState> {
     return _refreshAll();
   }
 
+  Future<MyCollectionsRefreshResult> refresh() async {
+    await _ensureCacheLoaded();
+    final hasAnyCache = _hasAnyItems(_itemsByType);
+    value = value.copyWith(
+      isLoading: !hasAnyCache,
+      isRefreshing: hasAnyCache,
+      items: _itemsForType(value.selectedType),
+      clearError: true,
+    );
+    return _refreshAll();
+  }
+
   void selectType(int type) {
     if (value.selectedType == type) {
       return;
@@ -129,12 +137,12 @@ class MyCollectionsStore extends ValueNotifier<MyCollectionsState> {
       for (final type in _trackedTypes) {
         try {
           final nextItems = await _fetchAllForType(type);
-            final cachedItems = _itemsForType(type);
-            if (!_sameSubjects(cachedItems, nextItems)) {
-              _itemsByType[type] = List<Subject>.unmodifiable(nextItems);
-              await _cacheRepository?.save(type, nextItems);
-              hasChanges = true;
-            }
+          final cachedItems = _itemsForType(type);
+          if (!_sameSubjects(cachedItems, nextItems)) {
+            _itemsByType[type] = List<Subject>.unmodifiable(nextItems);
+            await _cacheRepository?.save(type, nextItems);
+            hasChanges = true;
+          }
         } catch (error) {
           firstError ??= error;
         }
@@ -196,11 +204,7 @@ class MyCollectionsStore extends ValueNotifier<MyCollectionsState> {
     if (a.length != b.length) {
       return false;
     }
-    return jsonEncode(
-          a.map((item) => item.toJson()).toList(growable: false),
-        ) ==
-        jsonEncode(
-          b.map((item) => item.toJson()).toList(growable: false),
-        );
+    return jsonEncode(a.map((item) => item.toJson()).toList(growable: false)) ==
+        jsonEncode(b.map((item) => item.toJson()).toList(growable: false));
   }
 }

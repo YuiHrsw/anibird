@@ -89,6 +89,72 @@ class SubjectCard extends StatelessWidget {
   }
 }
 
+class SubjectNameGrid extends StatelessWidget {
+  const SubjectNameGrid({
+    super.key,
+    required this.subjects,
+    required this.onTap,
+  });
+
+  static const double _itemWidth = 112;
+  static const double _itemGap = 12;
+
+  final List<Subject> subjects;
+  final ValueChanged<Subject> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: _itemGap,
+      runSpacing: _itemGap,
+      children: [
+        for (final subject in subjects)
+          SizedBox(
+            width: _itemWidth,
+            child: _SubjectNameGridTile(
+              subject: subject,
+              onTap: () => onTap(subject),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _SubjectNameGridTile extends StatelessWidget {
+  const _SubjectNameGridTile({required this.subject, required this.onTap});
+
+  final Subject subject;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: AspectRatio(
+              aspectRatio: 3 / 4,
+              child: AppNetworkImage(imageUrl: subject.image, fit: BoxFit.cover),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subject.displayName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _InfoPill extends StatelessWidget {
   const _InfoPill({required this.label});
 

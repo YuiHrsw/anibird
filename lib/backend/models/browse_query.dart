@@ -4,7 +4,7 @@ class BrowseQuery {
     this.sort = 'rank',
     this.year,
     this.month,
-    this.limit = 12,
+    this.limit = 100,
     this.offset = 0,
   });
 

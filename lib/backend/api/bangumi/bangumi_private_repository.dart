@@ -9,6 +9,7 @@ import '../../models/subject_review.dart';
 import '../../models/timeline_item.dart';
 import '../../models/blog_entry.dart';
 import '../../models/blog_comment.dart';
+import '../../models/search_query.dart';
 
 class BangumiPrivateRepository {
   BangumiPrivateRepository(this._client);
@@ -49,6 +50,26 @@ class BangumiPrivateRepository {
     );
   }
 
+  Future<PagedResult<Subject>> searchSubjects(SearchQuery query) async {
+    final json = await _client.postJson(
+      'search/subjects',
+      queryParameters: {'limit': query.limit, 'offset': query.offset},
+      body: query.toJson(),
+    );
+    final items =
+        (json['data'] as List?)
+            ?.whereType<Map>()
+            .map((item) => Subject.fromJson(item.cast<String, dynamic>()))
+            .toList() ??
+        const <Subject>[];
+    return PagedResult<Subject>(
+      total: _asInt(json['total']),
+      limit: _asInt(json['limit'], fallback: query.limit),
+      offset: _asInt(json['offset'], fallback: query.offset),
+      data: items,
+    );
+  }
+
   Future<List<EpisodeComment>> getEpisodeComments(int episodeId) async {
     final json = await _client.getJsonList('episodes/$episodeId/comments');
     return json
@@ -65,11 +86,7 @@ class BangumiPrivateRepository {
   }) async {
     final json = await _client.getJson(
       'subjects/$subjectId/episodes',
-      queryParameters: {
-        'type': type,
-        'limit': limit,
-        'offset': offset,
-      },
+      queryParameters: {'type': type, 'limit': limit, 'offset': offset},
     );
     final items =
         (json['data'] as List?)
@@ -90,6 +107,11 @@ class BangumiPrivateRepository {
     return Episode.fromJson(json);
   }
 
+  Future<Subject> getSubjectDetail(int subjectId) async {
+    final json = await _client.getJson('subjects/$subjectId');
+    return Subject.fromJson(json);
+  }
+
   Future<PagedResult<SubjectComment>> getSubjectComments(
     int subjectId, {
     int limit = 10,
@@ -97,15 +119,14 @@ class BangumiPrivateRepository {
   }) async {
     final json = await _client.getJson(
       'subjects/$subjectId/comments',
-      queryParameters: {
-        'limit': limit,
-        'offset': offset,
-      },
+      queryParameters: {'limit': limit, 'offset': offset},
     );
     final items =
         (json['data'] as List?)
             ?.whereType<Map>()
-            .map((item) => SubjectComment.fromJson(item.cast<String, dynamic>()))
+            .map(
+              (item) => SubjectComment.fromJson(item.cast<String, dynamic>()),
+            )
             .toList() ??
         const <SubjectComment>[];
     return PagedResult<SubjectComment>(
@@ -123,10 +144,7 @@ class BangumiPrivateRepository {
   }) async {
     final json = await _client.getJson(
       'subjects/$subjectId/topics',
-      queryParameters: {
-        'limit': limit,
-        'offset': offset,
-      },
+      queryParameters: {'limit': limit, 'offset': offset},
     );
     final items =
         (json['data'] as List?)
@@ -149,10 +167,7 @@ class BangumiPrivateRepository {
   }) async {
     final json = await _client.getJson(
       'subjects/$subjectId/reviews',
-      queryParameters: {
-        'limit': limit,
-        'offset': offset,
-      },
+      queryParameters: {'limit': limit, 'offset': offset},
     );
     final items =
         (json['data'] as List?)
@@ -175,11 +190,7 @@ class BangumiPrivateRepository {
   }) async {
     final json = await _client.getJsonList(
       'timeline',
-      queryParameters: {
-        'mode': mode,
-        'limit': limit,
-        'until': until,
-      },
+      queryParameters: {'mode': mode, 'limit': limit, 'until': until},
     );
     return json
         .whereType<Map>()

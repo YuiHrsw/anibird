@@ -15,14 +15,23 @@ class AnibirdApp extends StatelessWidget {
       child: MaterialApp(
         title: 'Anibird',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
+        theme: _getThemeData(
+          ColorScheme.fromSeed(
             seedColor: Colors.pink,
             brightness: Brightness.light,
           ),
-          useMaterial3: true,
         ),
         home: const HomePage(),
+      ),
+    );
+  }
+
+  ThemeData _getThemeData(ColorScheme colorScheme) {
+    return ThemeData(
+      colorScheme: colorScheme,
+      appBarTheme: AppBarTheme(
+        scrolledUnderElevation: 0,
+        backgroundColor: colorScheme.surface,
       ),
     );
   }

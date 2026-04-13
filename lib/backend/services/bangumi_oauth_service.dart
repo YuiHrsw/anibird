@@ -7,6 +7,7 @@ import 'package:dio/dio.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/app_config.dart';
+import '../models/bangumi_client_config.dart';
 import '../models/bangumi_oauth_token.dart';
 
 class BangumiOAuthException implements Exception {
@@ -20,9 +21,11 @@ class BangumiOAuthException implements Exception {
 
 class BangumiOAuthService {
   BangumiOAuthService({
+    required BangumiClientConfig clientConfig,
     AppLinks? appLinks,
     Dio? dio,
-  }) : _appLinks = appLinks ?? AppLinks(),
+  }) : _clientConfig = clientConfig,
+       _appLinks = appLinks ?? AppLinks(),
        _dio = dio ??
            Dio(
              BaseOptions(
@@ -33,6 +36,7 @@ class BangumiOAuthService {
              ),
            );
 
+  final BangumiClientConfig _clientConfig;
   final AppLinks _appLinks;
   final Dio _dio;
 
@@ -47,13 +51,13 @@ class BangumiOAuthService {
   }
 
   Uri buildAuthorizationUri(AppConfig config, {required String state}) {
-    _validateOAuthConfig(config);
-    final uri = _oauthBaseUri(config).replace(
-      pathSegments: [..._oauthBaseUri(config).pathSegments, 'authorize'],
+    _validateOAuthConfig();
+    final uri = _oauthBaseUri().replace(
+      pathSegments: [..._oauthBaseUri().pathSegments, 'authorize'],
       queryParameters: {
-        'client_id': config.bangumiOauthClientId.trim(),
+        'client_id': _clientConfig.oauthClientId.trim(),
         'response_type': 'code',
-        'redirect_uri': config.bangumiOauthRedirectUri.trim(),
+        'redirect_uri': BangumiClientConfig.oauthRedirectUri,
         'state': state,
       },
     );
@@ -61,7 +65,7 @@ class BangumiOAuthService {
   }
 
   bool isOAuthCallback(Uri uri, AppConfig config) {
-    final redirect = Uri.tryParse(config.bangumiOauthRedirectUri.trim());
+    final redirect = Uri.tryParse(BangumiClientConfig.oauthRedirectUri);
     if (redirect == null) {
       return false;
     }
@@ -81,44 +85,41 @@ class BangumiOAuthService {
     required AppConfig config,
     required String code,
   }) async {
-    _validateOAuthConfig(config);
+    _validateOAuthConfig();
     return _postToken(
-      config: config,
       data: <String, dynamic>{
         'grant_type': 'authorization_code',
-        'client_id': config.bangumiOauthClientId.trim(),
-        'client_secret': config.bangumiOauthClientSecret.trim(),
+        'client_id': _clientConfig.oauthClientId.trim(),
+        'client_secret': _clientConfig.oauthClientSecret.trim(),
         'code': code,
-        'redirect_uri': config.bangumiOauthRedirectUri.trim(),
+        'redirect_uri': BangumiClientConfig.oauthRedirectUri,
       },
     );
   }
 
   Future<BangumiOAuthToken> refreshAccessToken(AppConfig config) async {
-    _validateOAuthConfig(config);
+    _validateOAuthConfig();
     if (config.bangumiRefreshToken.trim().isEmpty) {
       throw const BangumiOAuthException('缺少 Bangumi refresh token。');
     }
     return _postToken(
-      config: config,
       data: <String, dynamic>{
         'grant_type': 'refresh_token',
-        'client_id': config.bangumiOauthClientId.trim(),
-        'client_secret': config.bangumiOauthClientSecret.trim(),
+        'client_id': _clientConfig.oauthClientId.trim(),
+        'client_secret': _clientConfig.oauthClientSecret.trim(),
         'refresh_token': config.bangumiRefreshToken.trim(),
-        'redirect_uri': config.bangumiOauthRedirectUri.trim(),
+        'redirect_uri': BangumiClientConfig.oauthRedirectUri,
       },
     );
   }
 
   Future<BangumiOAuthToken> _postToken({
-    required AppConfig config,
     required Map<String, dynamic> data,
   }) async {
     try {
       final response = await _dio.post<String>(
-        _oauthBaseUri(config)
-            .replace(pathSegments: [..._oauthBaseUri(config).pathSegments, 'access_token'])
+        _oauthBaseUri()
+            .replace(pathSegments: [..._oauthBaseUri().pathSegments, 'access_token'])
             .toString(),
         data: data,
         options: Options(
@@ -143,9 +144,8 @@ class BangumiOAuthService {
     }
   }
 
-  Uri _oauthBaseUri(AppConfig config) {
-    final raw = config.bangumiPrivateApiBaseUrl.trim();
-    final base = Uri.parse(raw.isEmpty ? AppConfig.defaults.bangumiPrivateApiBaseUrl : raw);
+  Uri _oauthBaseUri() {
+    final base = Uri.parse(BangumiClientConfig.privateApiBaseUrl);
     final pathSegments = base.pathSegments.where((segment) => segment.isNotEmpty).toList();
     if (pathSegments.isNotEmpty && pathSegments.last == 'p1') {
       pathSegments.removeLast();
@@ -153,18 +153,14 @@ class BangumiOAuthService {
     return base.replace(pathSegments: [...pathSegments, 'oauth']);
   }
 
-  void _validateOAuthConfig(AppConfig config) {
-    if (config.bangumiPrivateApiBaseUrl.trim().isEmpty) {
-      throw const BangumiOAuthException('请先填写 Bangumi Private API Base URL。');
+  void _validateOAuthConfig() {
+    if (_clientConfig.oauthClientId.trim().isEmpty) {
+      throw const BangumiOAuthException('项目配置中缺少 Bangumi OAuth Client ID。');
     }
-    if (config.bangumiOauthClientId.trim().isEmpty) {
-      throw const BangumiOAuthException('请先填写 Bangumi OAuth Client ID。');
-    }
-    if (config.bangumiOauthClientSecret.trim().isEmpty) {
-      throw const BangumiOAuthException('请先填写 Bangumi OAuth Client Secret。');
-    }
-    if (config.bangumiOauthRedirectUri.trim().isEmpty) {
-      throw const BangumiOAuthException('请先填写 Bangumi OAuth Redirect URI。');
+    if (_clientConfig.oauthClientSecret.trim().isEmpty) {
+      throw const BangumiOAuthException(
+        '项目配置中缺少 Bangumi OAuth Client Secret。',
+      );
     }
   }
 }

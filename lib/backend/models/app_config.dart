@@ -1,13 +1,11 @@
+import 'agent_tool_config.dart';
+
 class AppConfig {
   const AppConfig({
     required this.llmBaseUrl,
     required this.llmApiKey,
     required this.llmModel,
-    required this.bangumiUserAgent,
-    required this.bangumiPrivateApiBaseUrl,
-    required this.bangumiOauthClientId,
-    required this.bangumiOauthClientSecret,
-    required this.bangumiOauthRedirectUri,
+    required this.enabledAgentToolNames,
     required this.bangumiAccessToken,
     required this.bangumiRefreshToken,
     required this.bangumiAccessTokenExpiresAt,
@@ -17,11 +15,7 @@ class AppConfig {
     llmBaseUrl: 'https://api.openai.com/v1',
     llmApiKey: '',
     llmModel: '',
-    bangumiUserAgent: 'Anibird/0.1.0 (Flutter)',
-    bangumiPrivateApiBaseUrl: 'https://next.bgm.tv/p1',
-    bangumiOauthClientId: '',
-    bangumiOauthClientSecret: '',
-    bangumiOauthRedirectUri: 'anibird://oauth/callback',
+    enabledAgentToolNames: defaultEnabledAgentToolNames,
     bangumiAccessToken: '',
     bangumiRefreshToken: '',
     bangumiAccessTokenExpiresAt: 0,
@@ -30,11 +24,7 @@ class AppConfig {
   final String llmBaseUrl;
   final String llmApiKey;
   final String llmModel;
-  final String bangumiUserAgent;
-  final String bangumiPrivateApiBaseUrl;
-  final String bangumiOauthClientId;
-  final String bangumiOauthClientSecret;
-  final String bangumiOauthRedirectUri;
+  final List<String> enabledAgentToolNames;
   final String bangumiAccessToken;
   final String bangumiRefreshToken;
   final int bangumiAccessTokenExpiresAt;
@@ -43,11 +33,7 @@ class AppConfig {
     String? llmBaseUrl,
     String? llmApiKey,
     String? llmModel,
-    String? bangumiUserAgent,
-    String? bangumiPrivateApiBaseUrl,
-    String? bangumiOauthClientId,
-    String? bangumiOauthClientSecret,
-    String? bangumiOauthRedirectUri,
+    List<String>? enabledAgentToolNames,
     String? bangumiAccessToken,
     String? bangumiRefreshToken,
     int? bangumiAccessTokenExpiresAt,
@@ -56,15 +42,8 @@ class AppConfig {
       llmBaseUrl: llmBaseUrl ?? this.llmBaseUrl,
       llmApiKey: llmApiKey ?? this.llmApiKey,
       llmModel: llmModel ?? this.llmModel,
-      bangumiUserAgent: bangumiUserAgent ?? this.bangumiUserAgent,
-      bangumiPrivateApiBaseUrl:
-          bangumiPrivateApiBaseUrl ?? this.bangumiPrivateApiBaseUrl,
-      bangumiOauthClientId:
-          bangumiOauthClientId ?? this.bangumiOauthClientId,
-      bangumiOauthClientSecret:
-          bangumiOauthClientSecret ?? this.bangumiOauthClientSecret,
-      bangumiOauthRedirectUri:
-          bangumiOauthRedirectUri ?? this.bangumiOauthRedirectUri,
+      enabledAgentToolNames:
+          enabledAgentToolNames ?? this.enabledAgentToolNames,
       bangumiAccessToken: bangumiAccessToken ?? this.bangumiAccessToken,
       bangumiRefreshToken: bangumiRefreshToken ?? this.bangumiRefreshToken,
       bangumiAccessTokenExpiresAt:
@@ -77,11 +56,7 @@ class AppConfig {
       'llmBaseUrl': llmBaseUrl,
       'llmApiKey': llmApiKey,
       'llmModel': llmModel,
-      'bangumiUserAgent': bangumiUserAgent,
-      'bangumiPrivateApiBaseUrl': bangumiPrivateApiBaseUrl,
-      'bangumiOauthClientId': bangumiOauthClientId,
-      'bangumiOauthClientSecret': bangumiOauthClientSecret,
-      'bangumiOauthRedirectUri': bangumiOauthRedirectUri,
+      'enabledAgentToolNames': enabledAgentToolNames,
       'bangumiAccessToken': bangumiAccessToken,
       'bangumiRefreshToken': bangumiRefreshToken,
       'bangumiAccessTokenExpiresAt': bangumiAccessTokenExpiresAt,
@@ -93,23 +68,12 @@ class AppConfig {
       llmBaseUrl: json['llmBaseUrl']?.toString() ?? defaults.llmBaseUrl,
       llmApiKey: json['llmApiKey']?.toString() ?? defaults.llmApiKey,
       llmModel: json['llmModel']?.toString() ?? defaults.llmModel,
-      bangumiUserAgent:
-          json['bangumiUserAgent']?.toString() ?? defaults.bangumiUserAgent,
-      bangumiPrivateApiBaseUrl:
-          json['bangumiPrivateApiBaseUrl']?.toString() ??
-          defaults.bangumiPrivateApiBaseUrl,
-      bangumiOauthClientId:
-          json['bangumiOauthClientId']?.toString() ??
-          defaults.bangumiOauthClientId,
-      bangumiOauthClientSecret:
-          json['bangumiOauthClientSecret']?.toString() ??
-          defaults.bangumiOauthClientSecret,
-      bangumiOauthRedirectUri:
-          json['bangumiOauthRedirectUri']?.toString() ??
-          defaults.bangumiOauthRedirectUri,
+      enabledAgentToolNames: _asStringList(
+        json['enabledAgentToolNames'],
+        defaults.enabledAgentToolNames,
+      ),
       bangumiAccessToken:
-          json['bangumiAccessToken']?.toString() ??
-          defaults.bangumiAccessToken,
+          json['bangumiAccessToken']?.toString() ?? defaults.bangumiAccessToken,
       bangumiRefreshToken:
           json['bangumiRefreshToken']?.toString() ??
           defaults.bangumiRefreshToken,
@@ -119,6 +83,20 @@ class AppConfig {
       ),
     );
   }
+}
+
+List<String> _asStringList(Object? value, List<String> fallback) {
+  if (value is! List) {
+    return fallback;
+  }
+  return value
+      .map((item) => item.toString())
+      .where((item) => item.isNotEmpty)
+      .map(
+        (item) =>
+            item == 'present_recommendations' ? 'set_recommendations' : item,
+      )
+      .toList(growable: false);
 }
 
 int _asInt(Object? value, int fallback) {

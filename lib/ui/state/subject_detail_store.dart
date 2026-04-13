@@ -116,7 +116,7 @@ class SubjectDetailStore extends ValueNotifier<SubjectDetailState> {
   Future<void> load(int subjectId) async {
     _setValue(value.copyWith(isLoading: true, clearError: true));
     try {
-      final subject = await _repository.getSubjectDetail(subjectId);
+      final subject = await _privateRepository.getSubjectDetail(subjectId);
       final relatedSubjects = await _repository.getRelatedSubjects(subjectId);
       final episodes = await _privateRepository.getSubjectEpisodes(subjectId);
       final subjectComments = await _privateRepository.getSubjectComments(

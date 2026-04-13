@@ -266,8 +266,12 @@ class _SubjectHeader extends StatelessWidget {
                   spacing: 6,
                   runSpacing: 6,
                   children: [
+                    if (subject.interest != null)
+                      _SubjectHeaderPill(
+                        label: _subjectCollectionTypeLabel(subject.interest!.type),
+                      ),
                     _SubjectHeaderPill(
-                      label: '评分 ${subject.score.toStringAsFixed(1)}',
+                      label: '${subject.score.toStringAsFixed(1)} / 10',
                     ),
                     _SubjectHeaderPill(
                       label: 'Rank ${subject.rank == 0 ? '-' : subject.rank}',

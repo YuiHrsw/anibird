@@ -98,11 +98,7 @@ class _HomePageState extends State<HomePage> {
       children: [
         const SizedBox(height: _topHolderHeight),
         Expanded(
-          child: SafeArea(
-            top: false,
-            bottom: false,
-            child: _buildTabBody(),
-          ),
+          child: _buildTabBody(),
         ),
       ],
     );

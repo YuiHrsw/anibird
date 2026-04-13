@@ -33,7 +33,10 @@ class OpenAICompatibleLlmProvider {
   final FileConfigRepository _configRepository;
   final Dio _dio;
 
-  Stream<LlmStreamEvent> streamChat(ChatRequest request) async* {
+  Stream<LlmStreamEvent> streamChat(
+    ChatRequest request, {
+    LlmRequestController? requestController,
+  }) async* {
     final config = await _configRepository.load();
     _validateConfig(config);
     final uri = _buildChatUri(config.llmBaseUrl);
@@ -51,11 +54,22 @@ class OpenAICompatibleLlmProvider {
       if (request.tools.isNotEmpty) 'tool_choice': 'auto',
     };
 
+    final cancelToken = CancelToken();
+    unawaited(
+      requestController?.whenCancelled.then((_) {
+        if (!cancelToken.isCancelled) {
+          cancelToken.cancel('cancelled_by_user');
+        }
+      }) ??
+          Future<void>.value(),
+    );
+
     late final Response<ResponseBody> response;
     try {
       response = await _dio.post<ResponseBody>(
         uri.toString(),
         data: requestBody,
+        cancelToken: cancelToken,
         options: Options(
           responseType: ResponseType.stream,
           validateStatus: (_) => true,
@@ -67,6 +81,9 @@ class OpenAICompatibleLlmProvider {
         ),
       );
     } on DioException catch (error) {
+      if (_isRequestCancelled(error, requestController)) {
+        throw const LlmRequestCancelledException();
+      }
       throw LlmConfigurationException(
         'LLM request failed: ${error.message ?? error.error ?? 'unknown error'}',
       );
@@ -100,58 +117,68 @@ class OpenAICompatibleLlmProvider {
     final contentBuffer = StringBuffer();
     final toolBuilders = <int, _ToolCallAccumulator>{};
 
-    await for (final line
-        in responseBody.stream
-            .map((chunk) => chunk.toList())
-            .transform(utf8.decoder)
-            .transform(
-          const LineSplitter(),
-        )) {
-      if (!line.startsWith('data: ')) {
-        continue;
-      }
-      final payload = line.substring(6).trim();
-      if (payload.isEmpty) {
-        continue;
-      }
-      if (payload == '[DONE]') {
-        break;
-      }
+    try {
+      await for (final line
+          in responseBody.stream
+              .map((chunk) => chunk.toList())
+              .transform(utf8.decoder)
+              .transform(
+            const LineSplitter(),
+          )) {
+        if (requestController?.isCancelled ?? false) {
+          throw const LlmRequestCancelledException();
+        }
+        if (!line.startsWith('data: ')) {
+          continue;
+        }
+        final payload = line.substring(6).trim();
+        if (payload.isEmpty) {
+          continue;
+        }
+        if (payload == '[DONE]') {
+          break;
+        }
 
-      final json = jsonDecode(payload) as Map<String, dynamic>;
-      final choices = json['choices'] as List? ?? const [];
-      if (choices.isEmpty) {
-        continue;
-      }
+        final json = jsonDecode(payload) as Map<String, dynamic>;
+        final choices = json['choices'] as List? ?? const [];
+        if (choices.isEmpty) {
+          continue;
+        }
 
-      final choice = (choices.first as Map).cast<String, dynamic>();
-      final delta =
-          (choice['delta'] as Map?)?.cast<String, dynamic>() ??
-          const <String, dynamic>{};
-      final deltaText = _flattenContent(delta['content']);
-      if (deltaText.isNotEmpty) {
-        contentBuffer.write(deltaText);
-        yield LlmStreamEvent(
-          response: ChatResponse(
-            content: contentBuffer.toString(),
-            toolCalls: _materializeToolCalls(toolBuilders),
-          ),
-          contentDelta: deltaText,
-          isDone: false,
-        );
-      }
+        final choice = (choices.first as Map).cast<String, dynamic>();
+        final delta =
+            (choice['delta'] as Map?)?.cast<String, dynamic>() ??
+            const <String, dynamic>{};
+        final deltaText = _flattenContent(delta['content']);
+        if (deltaText.isNotEmpty) {
+          contentBuffer.write(deltaText);
+          yield LlmStreamEvent(
+            response: ChatResponse(
+              content: contentBuffer.toString(),
+              toolCalls: _materializeToolCalls(toolBuilders),
+            ),
+            contentDelta: deltaText,
+            isDone: false,
+          );
+        }
 
-      final deltaToolCalls =
-          (delta['tool_calls'] as List?)?.whereType<Map>() ?? const <Map>[];
-      for (final item in deltaToolCalls) {
-        final toolDelta = item.cast<String, dynamic>();
-        final index = (toolDelta['index'] as int?) ?? 0;
-        final builder = toolBuilders.putIfAbsent(
-          index,
-          _ToolCallAccumulator.new,
-        );
-        builder.merge(toolDelta);
+        final deltaToolCalls =
+            (delta['tool_calls'] as List?)?.whereType<Map>() ?? const <Map>[];
+        for (final item in deltaToolCalls) {
+          final toolDelta = item.cast<String, dynamic>();
+          final index = (toolDelta['index'] as int?) ?? 0;
+          final builder = toolBuilders.putIfAbsent(
+            index,
+            _ToolCallAccumulator.new,
+          );
+          builder.merge(toolDelta);
+        }
       }
+    } on DioException catch (error) {
+      if (_isRequestCancelled(error, requestController)) {
+        throw const LlmRequestCancelledException();
+      }
+      rethrow;
     }
 
     final finalResponse = ChatResponse(
@@ -218,6 +245,15 @@ class OpenAICompatibleLlmProvider {
     );
     return uri.replace(pathSegments: [...baseSegments, 'chat', 'completions']);
   }
+}
+
+bool _isRequestCancelled(
+  DioException error,
+  LlmRequestController? requestController,
+) {
+  return requestController?.isCancelled == true ||
+      error.type == DioExceptionType.cancel ||
+      CancelToken.isCancel(error);
 }
 
 List<ToolCall> _materializeToolCalls(Map<int, _ToolCallAccumulator> builders) {

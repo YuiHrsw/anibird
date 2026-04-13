@@ -164,7 +164,7 @@ class Subject {
             .toList() ??
         const <SubjectTag>[];
     final metaTags =
-        (json['meta_tags'] as List?)
+        ((json['meta_tags'] ?? json['metaTags']) as List?)
             ?.map((item) => item.toString())
             .where((item) => item.isNotEmpty)
             .toList() ??
@@ -174,9 +174,10 @@ class Subject {
       id: _asInt(json['id']),
       type: _asInt(json['type']),
       name: json['name']?.toString() ?? '',
-      nameCn: json['name_cn']?.toString() ?? '',
+      nameCn: json['name_cn']?.toString() ?? json['nameCN']?.toString() ?? '',
       summary:
           json['summary']?.toString() ??
+          json['info']?.toString() ??
           json['short_summary']?.toString() ??
           '',
       date: json['date']?.toString() ?? '',

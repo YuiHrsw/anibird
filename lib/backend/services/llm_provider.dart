@@ -1,6 +1,29 @@
 import 'dart:convert';
+import 'dart:async';
 
 import '../models/tool.dart';
+
+class LlmRequestCancelledException implements Exception {
+  const LlmRequestCancelledException();
+
+  @override
+  String toString() => 'LLM request cancelled.';
+}
+
+class LlmRequestController {
+  final Completer<void> _cancelCompleter = Completer<void>();
+
+  bool get isCancelled => _cancelCompleter.isCompleted;
+
+  Future<void> get whenCancelled => _cancelCompleter.future;
+
+  void cancel() {
+    if (_cancelCompleter.isCompleted) {
+      return;
+    }
+    _cancelCompleter.complete();
+  }
+}
 
 class LlmMessage {
   const LlmMessage({

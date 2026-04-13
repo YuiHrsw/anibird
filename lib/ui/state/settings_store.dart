@@ -119,8 +119,6 @@ class SettingsStore extends ValueNotifier<SettingsState> {
         isSaving: false,
         clearError: true,
       );
-      await _ensureOauthListening();
-      await refreshBangumiProfile(silentWhenMissingCredentials: true);
     } catch (error) {
       value = value.copyWith(isSaving: false, error: error.toString());
       rethrow;
@@ -133,6 +131,7 @@ class SettingsStore extends ValueNotifier<SettingsState> {
       await _ensureOauthListening();
       final state = _bangumiOAuthService.generateState();
       _pendingOauthState = state;
+      _lastHandledOauthUri = null;
       final uri = _bangumiOAuthService.buildAuthorizationUri(
         config,
         state: state,
@@ -170,14 +169,13 @@ class SettingsStore extends ValueNotifier<SettingsState> {
     bool silentWhenMissingCredentials = false,
   }) async {
     final config = await _ensureValidBangumiAccessToken();
-    if (config.bangumiPrivateApiBaseUrl.trim().isEmpty ||
-        config.bangumiAccessToken.trim().isEmpty) {
+    if (config.bangumiAccessToken.trim().isEmpty) {
       value = value.copyWith(
         isLoadingBangumiProfile: false,
         clearBangumiProfile: true,
         bangumiProfileError: silentWhenMissingCredentials
             ? null
-            : '请先填写 Bangumi Private API Base URL 和 Access Token。',
+            : '请先登录 Bangumi。',
         clearBangumiProfileError: silentWhenMissingCredentials,
       );
       return;

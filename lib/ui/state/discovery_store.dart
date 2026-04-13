@@ -87,4 +87,12 @@ class DiscoveryStore extends ValueNotifier<DiscoveryState> {
       value = value.copyWith(isLoading: false, error: error.toString());
     }
   }
+
+  Future<void> refresh() async {
+    if (value.keyword.trim().isEmpty) {
+      await loadFeatured();
+      return;
+    }
+    await search(value.keyword);
+  }
 }

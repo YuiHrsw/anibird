@@ -4,10 +4,7 @@ import 'dart:io';
 import '../../models/app_config.dart';
 
 class FileConfigRepository {
-  FileConfigRepository({String? fileName})
-    : _file = File(
-        '${Directory.current.path}/${fileName ?? '.anibird_config.json'}',
-      );
+  FileConfigRepository(this._file);
 
   final File _file;
   AppConfig? _cached;

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import '../api/llm/openai_compatible_llm_provider.dart';
 import '../models/chat_message.dart';
@@ -39,8 +40,16 @@ class Agent {
   Stream<AgentReplyUpdate> streamUserMessage(
     String text,
     ChatContext context, {
+    List<String>? enabledToolNames,
     bool Function()? shouldStop,
+    LlmRequestController? requestController,
   }) async* {
+    final availableTools = enabledToolNames == null
+        ? _tools
+        : {
+            for (final name in enabledToolNames)
+              if (_tools.containsKey(name)) name: _tools[name]!,
+          };
     final messages = <LlmMessage>[
       LlmMessage(role: 'system', content: _buildSystemPrompt()),
       ...context.history.map(_historyToLlm),
@@ -52,7 +61,8 @@ class Agent {
 
     var turn = 0;
     while (true) {
-      if (shouldStop?.call() ?? false) {
+      if ((shouldStop?.call() ?? false) ||
+          (requestController?.isCancelled ?? false)) {
         yield AgentReplyUpdate(
           contents: contents,
           recommendations: recommendations,
@@ -64,57 +74,80 @@ class Agent {
 
       final request = ChatRequest(
         messages: messages,
-        tools: _tools.values.map((tool) => tool.definition).toList(),
+        tools: availableTools.values.map((tool) => tool.definition).toList(),
       );
       ChatResponse? response;
       var assistantText = '';
       final assistantContentId = 'assistant-turn-$turn';
       var hasAssistantTimeline = false;
-      await for (final event in _llmProvider.streamChat(request)) {
-        if (event.contentDelta.isNotEmpty) {
-          assistantText = event.response.content.trim();
-          if (assistantText.isNotEmpty) {
-            if (!hasAssistantTimeline) {
-              contents.add(
-                ChatContentItem.text(
-                  id: assistantContentId,
-                  content: assistantText,
-                ),
-              );
-              hasAssistantTimeline = true;
-            } else {
-              final timelineIndex = contents.lastIndexWhere(
-                (item) => item.id == assistantContentId,
-              );
-              if (timelineIndex != -1) {
-                contents[timelineIndex] = contents[timelineIndex].copyWith(
-                  content: assistantText,
+      try {
+        await for (final event in _llmProvider.streamChat(
+          request,
+          requestController: requestController,
+        )) {
+          if ((shouldStop?.call() ?? false) ||
+              (requestController?.isCancelled ?? false)) {
+            yield AgentReplyUpdate(
+              contents: contents,
+              recommendations: recommendations,
+              recommendationSubjectIds: recommendationSubjectIds,
+              isFinal: true,
+            );
+            return;
+          }
+          if (event.contentDelta.isNotEmpty) {
+            assistantText = event.response.content.trim();
+            if (assistantText.isNotEmpty) {
+              if (!hasAssistantTimeline) {
+                contents.add(
+                  ChatContentItem.text(
+                    id: assistantContentId,
+                    content: assistantText,
+                  ),
                 );
+                hasAssistantTimeline = true;
+              } else {
+                final timelineIndex = contents.lastIndexWhere(
+                  (item) => item.id == assistantContentId,
+                );
+                if (timelineIndex != -1) {
+                  contents[timelineIndex] = contents[timelineIndex].copyWith(
+                    content: assistantText,
+                  );
+                }
               }
             }
+            yield AgentReplyUpdate(
+              contents: contents,
+              recommendations: recommendations,
+              recommendationSubjectIds: recommendationSubjectIds,
+              isFinal: false,
+            );
           }
-          yield AgentReplyUpdate(
-            contents: contents,
-            recommendations: recommendations,
-            recommendationSubjectIds: recommendationSubjectIds,
-            isFinal: false,
-          );
+          if (event.isDone) {
+            response = event.response;
+            assistantText = response.content.trim();
+          }
         }
-        if (event.isDone) {
-          response = event.response;
-          assistantText = response.content.trim();
-        }
+      } on LlmRequestCancelledException {
+        yield AgentReplyUpdate(
+          contents: contents,
+          recommendations: recommendations,
+          recommendationSubjectIds: recommendationSubjectIds,
+          isFinal: true,
+        );
+        return;
       }
       if (response == null) {
         throw StateError('LLM 没有返回可用响应。');
       }
 
       if (response.toolCalls.isEmpty) {
-        if (assistantText.isEmpty) {
-          throw StateError(
-            '模型返回了空响应，且没有 tool_calls。当前模型或网关可能不支持 function calling，或响应格式不符合预期。',
-          );
-        }
+        // if (assistantText.isEmpty) {
+        //   throw StateError(
+        //     '模型返回了空响应，且没有 tool_calls。当前模型或网关可能不支持 function calling，或响应格式不符合预期。',
+        //   );
+        // }
         messages.add(LlmMessage(role: 'assistant', content: assistantText));
         if (!hasAssistantTimeline && assistantText.isNotEmpty) {
           contents.add(
@@ -142,7 +175,8 @@ class Agent {
       );
 
       for (final toolCall in response.toolCalls) {
-        if (shouldStop?.call() ?? false) {
+        if ((shouldStop?.call() ?? false) ||
+            (requestController?.isCancelled ?? false)) {
           yield AgentReplyUpdate(
             contents: contents,
             recommendations: recommendations,
@@ -153,7 +187,10 @@ class Agent {
         }
 
         final actionName = toolCall.name;
-        final execution = await _executeToolCall(toolCall);
+        final execution = await _executeToolCall(
+          toolCall,
+          tools: availableTools,
+        );
         messages.add(execution.toolMessage);
         contents.add(
           ChatContentItem.toolCall(
@@ -194,9 +231,12 @@ class Agent {
     );
   }
 
-  Future<_ToolExecutionResult> _executeToolCall(ToolCall toolCall) async {
+  Future<_ToolExecutionResult> _executeToolCall(
+    ToolCall toolCall, {
+    required Map<String, AgentTool> tools,
+  }) async {
     final actionName = toolCall.name;
-    final tool = _tools[actionName];
+    final tool = tools[actionName];
     if (tool == null) {
       final errorPayload = <String, dynamic>{
         'ok': false,
@@ -214,6 +254,11 @@ class Agent {
 
     try {
       final result = await tool.execute(toolCall.arguments);
+      developer.log(
+        'Tool success name=$actionName input=${_prettyJson(toolCall.arguments)} '
+        'observation=${formatStructuredData(result.payload, label: 'Observation')}',
+        name: 'anibird.agent.tool',
+      );
       return _ToolExecutionResult.success(
         toolCallId: toolCall.id,
         input: toolCall.arguments,
@@ -227,6 +272,12 @@ class Agent {
         'tool_name': actionName,
         'input': toolCall.arguments,
       };
+      developer.log(
+        'Tool failure name=$actionName input=${_prettyJson(toolCall.arguments)} '
+        'observation=${formatStructuredData(errorPayload, label: 'Observation')}',
+        name: 'anibird.agent.tool',
+        error: error,
+      );
       return _ToolExecutionResult.failure(
         toolName: actionName,
         toolCallId: toolCall.id,
@@ -242,14 +293,23 @@ String _buildSystemPrompt() {
   return '''
 你是 Anibird 内置的 Bangumi 动画助手。
 
-请优先通过 Bangumi 工具获取事实，再回答用户问题。
-如果你希望在回答下方展示推荐卡片，可以调用 present_recommendations，并按展示顺序传入 subject_id。
-搜索工具的 sort 只能使用 match、heat、rank、score；不确定时优先用 match。
-如果工具结果显示 ok=false 或错误信息，请根据已有信息自行判断是否继续调用工具、调整参数，或直接回答。
-最终回答使用中文 Markdown，并明确说明“基于 Bangumi 数据检索结果整理”。
+动画相关问题请优先通过 Bangumi 工具获取事实，再回答用户问题。
+推荐番剧时, 除非用户要求, 不得推荐用户看过或者抛弃的番剧
+最终回答使用中文 Markdown 格式。
 除非用户明确要求极短回答，否则尽量给出详细清晰的回答。
 
-如果要调用 present_recommendations，必须在给出最终回答之前提前调用，否则用户无法正常看到你输出的结果。
+请优先推荐评分较高(不能低于6分), 且用户还没看过的番剧
+搜索工具和获取详细工具已经包含了用户是否看过的信息
+如无必要, 不需要单独调用获取收藏工具
+
+基于 tag 的搜索相比于基于 keyword 的名称搜索更具灵活性
+
+Bangumi 的 api 出现超时等网络请求报错是正常的, 建议最多重试 3 次
+如果想优化用户查看你的回答时的体验, 可以尝试调用 set_recommendations.
+在准备开始输出最终给用户看的答案前，请先调用 mark_final_answer_start。
+mark_final_answer_start 之后到消息结束的内容会被视为最终答案区。
+调用工具获取信息的操作请在最终回答之前完成, 不要在最终答案区多次调用工具并输出思考流程,这会导致你的结果中出现大量多余信息.
+如果你需要重新回答,请再次调用 mark_final_answer_start 以覆盖之前的无效内容
 ''';
 }
 
@@ -320,7 +380,10 @@ class _ToolExecutionResult {
       ),
       actionInputJson: _prettyJson(input),
       subjects: result.subjects,
-      observationJson: formatStructuredData(result.payload, label: 'Observation'),
+      observationJson: formatStructuredData(
+        result.payload,
+        label: 'Observation',
+      ),
       recommendationSubjectIds: result.recommendationSubjectIds,
     );
   }
